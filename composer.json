@@ -1,0 +1,36 @@
+{
+    "name": "wonder-image/customer-account",
+    "description": "Account cliente persistente per wonder-image/app: schede contatto, collegamento utente, fatturazione e indirizzi di spedizione.",
+    "type": "library",
+    "license": "MIT",
+    "require": {
+        "php": "^8.2",
+        "wonder-image/app": "^2.5.0-beta.1 || dev-main"
+    },
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../app",
+            "options": {
+                "symlink": true
+            }
+        }
+    ],
+    "autoload": {
+        "psr-4": {
+            "Wonder\\Plugin\\CustomerAccount\\": "src/"
+        }
+    },
+    "extra": {
+        "wonder": {
+            "module": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "config": {
+        "platform": {
+            "php": "8.2.0"
+        }
+    }
+}

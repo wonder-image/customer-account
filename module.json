@@ -1,0 +1,32 @@
+{
+    "name": "Wonder Customer Account",
+    "slug": "customer-account",
+    "version": "0.1.0",
+    "description": "Account cliente persistente: schede contatto, collegamento utente, fatturazione e indirizzi di spedizione.",
+    "namespace": "Wonder\\Plugin\\CustomerAccount\\",
+    "entrypoint": "Wonder\\Plugin\\CustomerAccount\\CustomerAccount",
+    "author": {
+        "name": "Wonder Image",
+        "email": "info@wonderimage.it"
+    },
+    "frameworkCompatibility": {
+        "wonder-app": "^2.5.0-beta.1",
+        "php": "^8.2"
+    },
+    "dependencies": {
+        "modules": []
+    },
+    "paths": {
+        "src": "src",
+        "handlers": "http",
+        "views": "view",
+        "lang": "lang",
+        "tests": "tests"
+    },
+    "database": {
+        "models": "src/Models",
+        "migrations": [
+            "Wonder\\Plugin\\CustomerAccount\\Migrations\\LegacyContactTablesMigration"
+        ]
+    }
+}
