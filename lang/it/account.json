@@ -1,0 +1,35 @@
+{
+    "billing": {
+        "label": "Indirizzo di fatturazione",
+        "title": "Modifica l’indirizzo di fatturazione",
+        "intro": "Questi dati saranno utilizzati quando un acquisto richiede fatturazione.",
+        "holder": "Intestatario",
+        "tax": "Codice fiscale / P. IVA",
+        "address": "Indirizzo"
+    },
+    "addresses": {
+        "add": "Aggiungi indirizzo",
+        "add_first": "Aggiungi un indirizzo",
+        "empty": "Non hai indirizzi salvati",
+        "create_title": "Nuovo indirizzo",
+        "edit_title": "Modifica indirizzo",
+        "delete": "Elimina",
+        "delete_title": "Eliminare questo indirizzo?",
+        "deleted": "L’indirizzo è stato eliminato.",
+        "back": "Torna agli indirizzi"
+    },
+    "navigation": {
+        "addresses": "Indirizzi"
+    },
+    "overview": {
+        "address_first": "Primo indirizzo",
+        "addresses_count": "{{count}} salvati",
+        "addresses_none": "Nessun indirizzo salvato"
+    },
+    "personal": {
+        "birth_date": "Data di nascita",
+        "errors": {
+            "birth_date": "Data di nascita: valore non valido."
+        }
+    }
+}

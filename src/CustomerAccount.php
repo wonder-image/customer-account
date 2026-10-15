@@ -33,6 +33,12 @@ final class CustomerAccount implements ModuleInterface
         return $root !== '' && is_file($custom) ? $custom : self::root().'/view/'.ltrim($path, '/');
     }
 
+    /** View sigillata: sempre quella del package, senza override del sito. */
+    public static function packageView(string $path): string
+    {
+        return self::root().'/view/'.ltrim($path, '/');
+    }
+
     public static function langPath(): string
     {
         return self::root().'/lang';

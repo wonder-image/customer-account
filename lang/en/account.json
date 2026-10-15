@@ -1,0 +1,35 @@
+{
+    "billing": {
+        "label": "Billing address",
+        "title": "Edit billing address",
+        "intro": "These details will be used when a purchase requires billing.",
+        "holder": "Holder",
+        "tax": "Tax code / VAT number",
+        "address": "Address"
+    },
+    "addresses": {
+        "add": "Add address",
+        "add_first": "Add an address",
+        "empty": "You have no saved addresses",
+        "create_title": "New address",
+        "edit_title": "Edit address",
+        "delete": "Delete",
+        "delete_title": "Delete this address?",
+        "deleted": "The address has been deleted.",
+        "back": "Back to addresses"
+    },
+    "navigation": {
+        "addresses": "Addresses"
+    },
+    "overview": {
+        "address_first": "First address",
+        "addresses_count": "{{count}} saved",
+        "addresses_none": "No saved addresses"
+    },
+    "personal": {
+        "birth_date": "Date of birth",
+        "errors": {
+            "birth_date": "Date of birth: invalid value."
+        }
+    }
+}

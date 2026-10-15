@@ -28,5 +28,11 @@
         "migrations": [
             "Wonder\\Plugin\\CustomerAccount\\Migrations\\LegacyContactTablesMigration"
         ]
+    },
+    "views": {
+        "sealed": [
+            "pages/account",
+            "components/account"
+        ]
     }
 }
