@@ -23,6 +23,9 @@
         "lang": "lang",
         "tests": "tests"
     },
+    "routes": {
+        "frontend": "config/routes/route.frontend.php"
+    },
     "database": {
         "models": "src/Models",
         "migrations": [
