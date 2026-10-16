@@ -2,12 +2,36 @@
 
 namespace Wonder\Plugin\CustomerAccount;
 
+use Wonder\App\Module\ConfigRepository;
 use Wonder\App\Module\Contracts\ModuleInterface;
 
-/** Entrypoint del modulo: percorsi di view, handler e traduzioni. */
+/** Entrypoint del modulo: percorsi di view, handler e traduzioni, configurazione. */
 final class CustomerAccount implements ModuleInterface
 {
     public const SLUG = 'customer-account';
+
+    private static ?array $config = null;
+
+    /** I default di `config/module.php` sotto quelli del sito; `$key` con i punti (`signup.fields`). */
+    public static function config(?string $key = null, mixed $default = null): mixed
+    {
+        if (self::$config === null) {
+            $defaults = require self::root().'/config/module.php';
+            $site = class_exists(ConfigRepository::class) ? ConfigRepository::for(self::SLUG) : [];
+            self::$config = array_replace_recursive((array) $defaults, (array) $site);
+        }
+        if ($key === null) {
+            return self::$config;
+        }
+        $value = self::$config;
+        foreach (explode('.', $key) as $segment) {
+            if (!is_array($value) || !array_key_exists($segment, $value)) {
+                return $default;
+            }
+            $value = $value[$segment];
+        }
+        return $value;
+    }
 
     public static function root(): string
     {

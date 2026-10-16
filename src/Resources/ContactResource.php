@@ -4,6 +4,7 @@ namespace Wonder\Plugin\CustomerAccount\Resources;
 
 use InvalidArgumentException;
 use Wonder\Plugin\CustomerAccount\Models\Contact;
+use Wonder\Plugin\CustomerAccount\Support\ContactExport;
 use Wonder\App\Resource;
 use Wonder\App\ResourceRegistry;
 use Wonder\App\ResourceSchema\{ApiSchema, FormField, NavigationSchema, PageSchema, PermissionSchema, TableColumn, TableLayoutSchema};
@@ -102,7 +103,10 @@ class ContactResource extends Resource
     }
     public static function tableLayoutSchema(): TableLayoutSchema
     {
-        return TableLayoutSchema::for(static::class)->searchFields(['name', 'surname', 'business_name', 'email', 'city']);
+        return TableLayoutSchema::for(static::class)->searchFields(['name', 'surname', 'business_name', 'email', 'city'])
+            ->download(ContactExport::FORMATS)->downloadAsText()
+            ->downloadColumns(ContactExport::columns(static::labelSchema(), [static::class, 'displayName']))
+            ->downloadFileName(create_link((string) __t('contacts.title')).'-'.date('Y-m-d'));
     }
     public static function mutateRequestValues(array $values, string $action, string $context = 'backend', ?array $oldValues = null): array
     {

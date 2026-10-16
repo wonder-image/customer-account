@@ -12,6 +12,7 @@ use Wonder\Auth\Frontend\BaseAccountExtension;
 use Wonder\Http\Route;
 use Wonder\Plugin\CustomerAccount\CustomerAccount;
 use Wonder\Plugin\CustomerAccount\Models\Contact;
+use Wonder\Plugin\CustomerAccount\Support\BirthDate;
 
 /**
  * La scheda cliente nel pannello del core: data di nascita e telefono in «Dati personali», la fatturazione
@@ -119,12 +120,7 @@ class CustomerAccountExtension extends BaseAccountExtension
 
     public function validatePersonal(array $input, object $user): array
     {
-        $birth = trim((string) ($input['birth_date'] ?? ''));
-        $date = $birth === '' ? null : \DateTimeImmutable::createFromFormat('!Y-m-d', $birth);
-        if ($birth !== '' && (!$date || $date->format('Y-m-d') !== $birth || $date > new \DateTimeImmutable('today'))) {
-            return [(string) __t('account.personal.errors.birth_date')];
-        }
-        return [];
+        return BirthDate::valid((string) ($input['birth_date'] ?? '')) ? [] : [(string) __t('account.personal.errors.birth_date')];
     }
 
     /** Nella transazione dei dati personali: la scheda si collega (o si aggiorna) e prende la data di nascita. */

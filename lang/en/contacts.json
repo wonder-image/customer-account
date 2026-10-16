@@ -1,5 +1,5 @@
 {
-  "title": "Contacts", "contact": "Contact", "email": "Email", "note": "Notes",
+  "title": "Contacts", "contact": "Contact", "email": "Email", "created": "Created on", "note": "Notes",
   "active": "Active contact", "enabled": "Active", "disabled": "Inactive",
   "addresses": "Shipping addresses", "address": "Shipping address", "address_label": "Label (optional)",
   "invalid": "Check the contact type and status.",
