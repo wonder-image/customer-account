@@ -27,9 +27,10 @@ class ContactAddress extends Model
     public static string $icon = 'bi bi-geo';
 
     /** L'indirizzo semplice del core, con destinatario e telefono. */
-    public static function address(): AddressExtension
+    /** `$prefix` per un indirizzo dentro un altro form (`shipping` nella registrazione): i campi diventano `shipping_*`. */
+    public static function address(?string $prefix = null): AddressExtension
     {
-        return AddressExtension::simple(countryDefault: 'IT')
+        return AddressExtension::simple($prefix, countryDefault: 'IT')
             ->withLink(false)
             ->withContactName()
             ->withPhone()

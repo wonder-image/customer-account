@@ -31,5 +31,12 @@
         "errors": {
             "birth_date": "Date of birth: invalid value."
         }
+    },
+    "signup": {
+        "billing": "Billing details",
+        "shipping_address": "Shipping address",
+        "errors": {
+            "birth_date_required": "Enter your date of birth."
+        }
     }
 }

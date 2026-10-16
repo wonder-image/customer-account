@@ -31,5 +31,12 @@
         "errors": {
             "birth_date": "Data di nascita: valore non valido."
         }
+    },
+    "signup": {
+        "billing": "Dati di fatturazione",
+        "shipping_address": "Indirizzo di spedizione",
+        "errors": {
+            "birth_date_required": "Inserisci la data di nascita."
+        }
     }
 }

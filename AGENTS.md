@@ -14,6 +14,15 @@ Le convenzioni del framework sono in `vendor/wonder-image/app/AGENTS.md`.
   controller; rispettare `AccountPanel::sections()` (`addresses`, `billing`).
   Avvisi di pagina fuori dai form, tema attivo (mai `render('wonder')`), CSRF e
   controllo di proprietà su ogni scrittura.
+- Campi della registrazione: config `signup.fields` (`phone`, `birth_date`,
+  `billing`, `shipping_address`; `off`/`optional`/`required`) letta da
+  `HasSignupFields` / `CustomerAuthProfile`, default del profilo con
+  `signupDefaults()`. Indirizzi con prefisso (`billing_`, `shipping_`) via
+  `AccountAddressForm` / `AccountAddressValidation` del core; salvataggio nella
+  transazione della conferma. Non aggiungere sezioni fuori da
+  `SignupFields::SECTIONS` senza test.
+- Export: le Resource su `contacts` usano `ContactExport::FORMATS` /
+  `columns()` con `downloadAsText()`; niente colonne duplicate per Resource.
 - Le Resource sono fallback di tabella: gestionale e sito hanno la precedenza e
   il menu non deve duplicare la voce.
 - Migrazioni solo in `database.migrations`, idempotenti, con
