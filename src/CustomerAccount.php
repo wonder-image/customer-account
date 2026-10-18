@@ -3,10 +3,12 @@
 namespace Wonder\Plugin\CustomerAccount;
 
 use Wonder\App\Module\ConfigRepository;
+use Wonder\App\Module\Contracts\ModuleGoogleApis;
 use Wonder\App\Module\Contracts\ModuleInterface;
+use Wonder\App\Support\GoogleCloud\GoogleApi;
 
 /** Entrypoint del modulo: percorsi di view, handler e traduzioni, configurazione. */
-final class CustomerAccount implements ModuleInterface
+final class CustomerAccount implements ModuleInterface, ModuleGoogleApis
 {
     public const SLUG = 'customer-account';
 
@@ -61,6 +63,19 @@ final class CustomerAccount implements ModuleInterface
     public static function packageView(string $path): string
     {
         return self::root().'/view/'.ltrim($path, '/');
+    }
+
+    /**
+     * Autocompletamento degli indirizzi nell'area cliente (spedizione,
+     * fatturazione, registrazione): `places.js` della lib carica la Maps
+     * JavaScript API e da lì la libreria Places.
+     */
+    public static function googleApis(): iterable
+    {
+        return [
+            GoogleApi::make('maps_javascript')->required()->usedBy(self::SLUG),
+            GoogleApi::make('places')->required()->usedBy(self::SLUG),
+        ];
     }
 
     public static function langPath(): string
