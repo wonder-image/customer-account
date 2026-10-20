@@ -199,10 +199,6 @@ trait HasSignupFields
             $contactId = ($link->success ?? false) ? (int) ($link->contact_id ?? 0) : 0;
         }
         if ($contactId <= 0) {
-            if ($surface === 'email.verify') {
-                error_log('Customer account contact link failed on email.verify: '.(string) ($link->reason ?? 'unknown'));
-                return;
-            }
             throw new AccountSaveFailed('contact');
         }
         if ($birth !== '' && !(Contact::update(['birth_date' => $birth], $contactId)->success ?? false)) {

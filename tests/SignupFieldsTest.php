@@ -30,6 +30,7 @@ final class ProfiloDelModulo extends CustomerAuthProfile
     {
         $this->linked[] = [$userId, $contactId, $surface];
     }
+    public function salvaCampi(int $userId, array $input): void { $this->saveSignupFields($userId, $input); }
 }
 
 $base = ['name' => 'Ada', 'surname' => 'Lovelace', 'email' => 'ada@example.com', 'password' => 'Password-sicura-1', 'password_confirmation' => 'Password-sicura-1', 'privacy' => 'true', 'csrf_token' => 'x'];
@@ -176,6 +177,23 @@ check('signup-completion e federated con la scheda di un altro utente: AccountSa
         }
     }
     return true;
+});
+
+check('saveSignupFields() chiamato da solo con la scheda di un altro utente: AccountSaveFailed, nessun warning', function () use ($conflict) {
+    \Wonder\Sql\Query::reset($conflict);
+    set_error_handler(static function (int $level, string $message): never {
+        throw new \ErrorException($message, 0, $level);
+    });
+    try {
+        (new ProfiloDelModulo(['birth_date' => 'optional']))->salvaCampi(7, ['birth_date' => '1990-04-02']);
+        return false;
+    } catch (\Wonder\Auth\Frontend\AccountSaveFailed) {
+        return \Wonder\Sql\Query::$writes === [];
+    } catch (\Throwable) {
+        return false;
+    } finally {
+        restore_error_handler();
+    }
 });
 
 summary();
