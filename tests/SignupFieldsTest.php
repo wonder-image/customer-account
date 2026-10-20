@@ -143,15 +143,39 @@ check('il modulo spegne una superficie: niente collegamento e niente gancio', fu
     return $profile->linked === [] && \Wonder\Sql\Query::$writes === [];
 });
 
-check('scheda di un altro utente: AccountSaveFailed e nessun gancio', function () {
-    \Wonder\Sql\Query::reset(['contacts' => [3 => ['id' => 3, 'deleted' => 'false', 'email' => 'ada@example.com', 'user_id' => 8]]]);
+$conflict = ['contacts' => [3 => ['id' => 3, 'deleted' => 'false', 'email' => 'ada@example.com', 'user_id' => 8]]];
+
+check('email.verify con la scheda di un altro utente: nessuna eccezione, nessun gancio, errore nel log', function () use ($conflict) {
+    \Wonder\Sql\Query::reset($conflict);
+    $log = tempnam(sys_get_temp_dir(), 'ca-log');
+    $previous = ini_set('error_log', $log);
     $profile = new ProfiloDelModulo();
     try {
         $profile->afterUserSaved(7, 'email.verify', []);
+    } catch (\Throwable) {
         return false;
-    } catch (\Wonder\Auth\Frontend\AccountSaveFailed) {
-        return $profile->linked === [] && \Wonder\Sql\Query::$writes === [];
+    } finally {
+        ini_set('error_log', (string) $previous);
     }
+    $logged = (string) file_get_contents($log);
+    unlink($log);
+    return $profile->linked === [] && \Wonder\Sql\Query::$writes === [] && str_contains($logged, 'contact_link_conflict');
+});
+
+check('signup-completion e federated con la scheda di un altro utente: AccountSaveFailed e nessun gancio', function () use ($conflict) {
+    foreach (['signup-completion', 'federated'] as $surface) {
+        \Wonder\Sql\Query::reset($conflict);
+        $profile = new ProfiloDelModulo();
+        try {
+            $profile->afterUserSaved(7, $surface, []);
+            return false;
+        } catch (\Wonder\Auth\Frontend\AccountSaveFailed) {
+            if ($profile->linked !== [] || \Wonder\Sql\Query::$writes !== []) {
+                return false;
+            }
+        }
+    }
+    return true;
 });
 
 summary();

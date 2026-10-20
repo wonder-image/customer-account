@@ -111,7 +111,8 @@ trait HasSignupFields
     /**
      * Collega la scheda con i dati dell'utente sulle superfici di `linksContactOn()`, poi chiama
      * `afterContactLinked()` e, nella conferma, salva i campi del secondo passo.
-     * Una scheda che non si collega ferma il passo (`AccountSaveFailed`).
+     * Su `email.verify` il collegamento è best effort (il token è già consumato): l'errore va nel log
+     * e la conferma lo rifà in transazione. Altrove una scheda che non si collega ferma il passo (`AccountSaveFailed`).
      */
     public function afterUserSaved(int $userId, string $surface, array $input): void
     {
@@ -122,6 +123,10 @@ trait HasSignupFields
         $link = ContactAccount::link($userId, $this->phoneEnabled() ? array_intersect_key($input, ['phone_prefix' => true, 'phone' => true]) : []);
         $contactId = ($link->success ?? false) ? (int) ($link->contact_id ?? 0) : 0;
         if ($contactId <= 0) {
+            if ($surface === 'email.verify') {
+                error_log('Customer account contact link failed on email.verify: '.(string) ($link->reason ?? 'unknown'));
+                return;
+            }
             throw new AccountSaveFailed('contact');
         }
         $this->afterContactLinked($userId, $contactId, $surface, $input);
@@ -194,6 +199,10 @@ trait HasSignupFields
             $contactId = ($link->success ?? false) ? (int) ($link->contact_id ?? 0) : 0;
         }
         if ($contactId <= 0) {
+            if ($surface === 'email.verify') {
+                error_log('Customer account contact link failed on email.verify: '.(string) ($link->reason ?? 'unknown'));
+                return;
+            }
             throw new AccountSaveFailed('contact');
         }
         if ($birth !== '' && !(Contact::update(['birth_date' => $birth], $contactId)->success ?? false)) {
