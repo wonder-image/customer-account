@@ -38,6 +38,13 @@ check('un indirizzo eliminato non conta: il nuovo diventa predefinito', function
     return $saved->success && $row($saved->id)['is_default'] === 'true' && (int) $row($saved->id)['position'] === 1;
 });
 
+check('scheda con indirizzi ma senza predefinito: il nuovo lo diventa', function () use ($address, $seed, $row) {
+    Query::reset(['contact_addresses' => [1 => $seed(1, 5, 1, 'false'), 2 => $seed(2, 5, 2, 'false'), 3 => $seed(3, 6, 1, 'true')]]);
+    $saved = AccountAddresses::save(5, $address);
+    return $saved->success && $row($saved->id)['is_default'] === 'true' && (int) $row($saved->id)['position'] === 3
+        && $row(1)['is_default'] === 'false' && $row(2)['is_default'] === 'false';
+});
+
 check('modifica: il predefinito non cambia', function () use ($address, $seed, $row) {
     Query::reset(['contact_addresses' => [1 => $seed(1, 5, 1, 'true'), 2 => $seed(2, 5, 2, 'false')]]);
     $saved = AccountAddresses::save(5, $address, 2);

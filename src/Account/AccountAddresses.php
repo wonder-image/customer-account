@@ -41,12 +41,12 @@ final class AccountAddresses
             return (object) ['success' => false, 'messages' => $messages, 'id' => $addressId ?? 0];
         }
         if ($addressId === null) {
-            // Il primo indirizzo attivo della scheda diventa il predefinito.
-            $first = ContactAddress::find(['contact_id' => $contactId], 1);
+            // Predefinito se la scheda non ne ha uno attivo: ripara anche le schede di prima.
+            $default = ContactAddress::find(['contact_id' => $contactId, 'is_default' => 'true'], 1);
             $result = ContactAddress::create($values + [
                 'contact_id' => $contactId,
                 'position' => self::nextPosition($contactId),
-                'is_default' => is_array($first) && $first !== [] ? 'false' : 'true',
+                'is_default' => is_array($default) && $default !== [] ? 'false' : 'true',
             ]);
             $id = (int) ($result->insert_id ?? 0);
         } else {
