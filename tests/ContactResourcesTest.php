@@ -1,5 +1,5 @@
 <?php
-/** php tests/ContactResourcesTest.php — Resource dei contatti e degli indirizzi: fallback, menu, API, pagine e token (database finto: il form degli indirizzi legge le schede). */
+/** php tests/ContactResourcesTest.php — Resource dei contatti e degli indirizzi: fallback, menu, API, pagine e CSRF del core (database finto: il form degli indirizzi legge le schede). */
 declare(strict_types=1);
 
 require __DIR__.'/support/FakeDb.php';
@@ -7,6 +7,7 @@ require __DIR__.'/bootstrap.php';
 
 use Wonder\App\Resource;
 use Wonder\App\ResourceRegistry;
+use Wonder\Http\Csrf;
 use Wonder\Plugin\CustomerAccount\Models\Contact;
 use Wonder\Plugin\CustomerAccount\Resources\ContactAddressResource;
 use Wonder\Plugin\CustomerAccount\Resources\ContactResource;
@@ -57,14 +58,45 @@ check('API spente e nessuna pagina di eliminazione', function () use ($resources
     return true;
 });
 
-check('i form portano il token _contact_csrf', function () use ($resources) {
+check('i form non portano più _contact_csrf: il token _csrf lo emette la pagina del core', function () use ($resources) {
     foreach ($resources as $resource) {
         $names = array_map(static fn ($field) => $field->name, $resource::formSchema());
-        if (!in_array('_contact_csrf', $names, true)) {
+        if (in_array('_contact_csrf', $names, true)) {
             return false;
         }
     }
     return true;
+});
+
+// Il messaggio di __t() nei test è la chiave: così si distingue il rifiuto CSRF da quello di validazione.
+$rejection = static function (callable $fn): ?string {
+    try {
+        $fn();
+    } catch (InvalidArgumentException $e) {
+        return $e->getMessage();
+    }
+    return null;
+};
+$_SESSION = [];
+$token = Csrf::token();
+$contact = ['type' => 'private', 'name' => 'Ada', 'surname' => 'Lovelace', 'active' => 'true'];
+
+check('mutateRequestValues senza _csrf, con _csrf sbagliato o col solo _contact_csrf: rifiutato con contacts.csrf', function () use ($resources, $rejection, $contact, $token) {
+    foreach ($resources as $resource) {
+        foreach ([[], ['_csrf' => 'sbagliato'], ['_contact_csrf' => $token]] as $extra) {
+            if ($rejection(static fn () => $resource::mutateRequestValues($contact + $extra, 'update')) !== 'contacts.csrf') {
+                return false;
+            }
+        }
+    }
+    return true;
+});
+
+check('mutateRequestValues con _csrf di sessione: passa il controllo e _csrf non arriva al salvataggio', function () use ($rejection, $contact, $token) {
+    $values = ContactResource::mutateRequestValues($contact + ['_csrf' => $token], 'update');
+    // L'indirizzo supera il CSRF e si ferma sulla scheda mancante.
+    $address = $rejection(static fn () => ContactAddressResource::mutateRequestValues(['_csrf' => $token, 'contact_id' => '0'], 'update'));
+    return !array_key_exists('_csrf', $values) && $values['name'] === 'Ada' && $address === 'contacts.invalid_contact';
 });
 
 summary();

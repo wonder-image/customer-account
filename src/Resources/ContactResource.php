@@ -8,9 +8,9 @@ use Wonder\Plugin\CustomerAccount\Support\ContactExport;
 use Wonder\App\Resource;
 use Wonder\App\ResourceRegistry;
 use Wonder\App\ResourceSchema\{ApiSchema, FormField, NavigationSchema, PageSchema, PermissionSchema, TableColumn, TableLayoutSchema};
-use Wonder\Auth\Frontend\AuthSession;
 use Wonder\Elements\Components\Card;
 use Wonder\Elements\Form\Form;
+use Wonder\Http\Csrf;
 
 /** App-only address book, without commercial fields or account credentials. */
 class ContactResource extends Resource
@@ -42,7 +42,6 @@ class ContactResource extends Resource
             FormField::key('email')->email(),
             FormField::key('note')->textarea(),
             FormField::key('active')->select(['true' => (string) __t('contacts.enabled'), 'false' => (string) __t('contacts.disabled')])->value('true')->required(),
-            FormField::key('_contact_csrf')->hidden()->value(AuthSession::csrfToken()),
         ];
     }
     public static function formLayoutSchema(): ?Form
@@ -134,9 +133,10 @@ class ContactResource extends Resource
         if ($action === 'store') { $values['code'] = Contact::newCode(); }
         return $values;
     }
+    /** Difesa locale: il controller del core ha già verificato `_csrf`, che arriva qui con il POST. */
     protected static function verifyFormToken(array $values): void
     {
-        if (!is_string($values['_contact_csrf'] ?? null) || !AuthSession::verify($values['_contact_csrf'])) {
+        if (!Csrf::verify($values)) {
             throw new InvalidArgumentException((string) __t('contacts.csrf'));
         }
     }
