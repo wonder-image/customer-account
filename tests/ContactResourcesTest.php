@@ -58,7 +58,7 @@ check('API spente e nessuna pagina di eliminazione', function () use ($resources
     return true;
 });
 
-check('i form non portano più _contact_csrf: il token _csrf lo emette la pagina del core', function () use ($resources) {
+check('i form non contengono il campo _contact_csrf', function () use ($resources) {
     foreach ($resources as $resource) {
         $names = array_map(static fn ($field) => $field->name, $resource::formSchema());
         if (in_array('_contact_csrf', $names, true)) {
