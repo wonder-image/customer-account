@@ -58,6 +58,14 @@ check('indirizzo di un\'altra scheda: save e delete falliscono senza scrivere', 
     return !$saved->success && !$deleted && Query::$writes === [] && $row(1)['street'] === 'Via 1';
 });
 
+check('senza scheda (contactId 0): niente lettura, modifica o eliminazione, anche di un indirizzo con contact_id 0', function () use ($address, $seed, $row) {
+    Query::reset(['contact_addresses' => [1 => $seed(1, 0, 1, 'true')]]);
+    $saved = AccountAddresses::save(0, $address, 1);
+    $deleted = AccountAddresses::delete(0, 1);
+    return !$saved->success && !$deleted && AccountAddresses::find(0, 1) === null && AccountAddresses::all(0) === []
+        && Query::$writes === [] && $row(1)['street'] === 'Via 1';
+});
+
 check('indirizzo incompleto: rifiutato dalla validazione, nessuna scrittura', function () use ($address) {
     Query::reset();
     $saved = AccountAddresses::save(5, ['number' => ''] + $address);
