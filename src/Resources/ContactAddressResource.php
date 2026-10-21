@@ -6,7 +6,7 @@ use InvalidArgumentException;
 use Wonder\Plugin\CustomerAccount\Models\{Contact, ContactAddress};
 use Wonder\App\ResourceSchema\{FormField, NavigationSchema, PageSchema, TableColumn, TableLayoutSchema};
 use Wonder\App\Support\GoogleMaps;
-use Wonder\Auth\Frontend\{AccountAddressForm, AccountAddressValidation, AuthSession};
+use Wonder\Auth\Frontend\{AccountAddressForm, AccountAddressValidation};
 
 /** Shipping addresses are managed independently, always bound to an existing contact. */
 class ContactAddressResource extends ContactResource
@@ -33,7 +33,6 @@ class ContactAddressResource extends ContactResource
             FormField::key('contact_id')->selectSearch(static::contactOptions())->required(),
             FormField::key('label')->text(),
             ...array_values(AccountAddressForm::fields(ContactAddress::address())),
-            FormField::key('_contact_csrf')->hidden()->value(AuthSession::csrfToken()),
         ];
     }
     public static function mutateFormValues(array $values, string $mode, string $context = 'backend'): array
