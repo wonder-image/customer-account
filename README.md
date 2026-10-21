@@ -21,8 +21,8 @@ Ordine consigliato in `modules.php`: `customer-account`, poi `gestionale`, poi `
 | Parte | Dove | Note |
 |---|---|---|
 | Modelli `Contact`, `ContactAddress` | `src/Models` | Tabelle `contacts` e `contact_addresses`, escluse dalla sync dei dati operativi. |
-| Migrazione `LegacyContactTablesMigration` | `database.migrations` | `forge update` la esegue prima dell'allineamento delle tabelle: rinomina `gst_contacts` e `gst_contact_addresses` con un solo `RENAME TABLE` (ID, righe e FK intatti). Se esistono sia il nome vecchio sia il nuovo si ferma senza toccare nulla. Idempotente. |
-| Resource `ContactResource`, `ContactAddressResource` | `src/Resources` | `/backend/contacts/` e `/backend/contact-addresses/`, solo `admin`/`administrator`, CSRF, niente API né eliminazione. Sono fallback di tabella (`isTableFallback()`): con il gestionale vince il suo «Clienti» e il menu non mostra «Contatti». |
+| Migrazione `LegacyContactTablesMigration` | `database.migrations` | `forge update` la esegue dopo la rinomina del core (`gst_external_references` → `external_references`) e prima dell'allineamento delle tabelle (`runTables()`): rinomina `gst_contacts` e `gst_contact_addresses` con un solo `RENAME TABLE` (ID, righe e FK intatti). Se esistono sia il nome vecchio sia il nuovo si ferma con un errore: la rinomina del core resta fatta, le tabelle non si allineano, niente si cancella né si unisce. Riconciliate le tabelle, il `forge update` seguente riprende da lì. Idempotente. |
+| Resource `ContactResource`, `ContactAddressResource` | `src/Resources` | `/backend/contacts/` e `/backend/contact-addresses/`, solo `admin`/`administrator`, CSRF, niente API né eliminazione. Sono fallback di tabella (`isTableFallback()`): per la tabella vince la prima Resource non fallback nell'ordine di scoperta del registro (`ResourceRegistry::resolveByTable()`), e il menu non mostra «Contatti» se un'altra Resource, che non ne è sottoclasse, usa `contacts`. Il «Clienti» del gestionale è uno di questi casi. |
 | `CustomerAccountExtension` | `config/routes/route.frontend.php` | Si registra con `AccountRoutes::extend()` nel pannello account del core. |
 | Viste sigillate | `view/pages/account`, `view/components/account` | Non si sostituiscono da `custom/`. |
 
@@ -67,6 +67,7 @@ Serve un profilo con i campi: `Auth\CustomerAuthProfile` (il profilo del core pi
 
 - Una sezione facoltativa si salva solo se il cliente scrive un campo vero (`SignupFields::FILLED_KEYS`): paese, prefisso e nome precompilati non bastano.
 - Gli errori degli indirizzi escono come avvisi di pagina con il nome della sezione davanti («Indirizzo di spedizione: Città: campo obbligatorio.»).
+- La scheda si collega con i dati dell'utente su `email.verify`, `signup-completion` e `federated` (mai su `signup-request`). Su `email.verify` è best effort: il token è già consumato, quindi un errore va nel log (`error_log()`, come gli altri errori dell'auth del core) e l'utente prosegue verso la conferma, dove il collegamento si rifà in transazione. Su `signup-completion` e `federated` una scheda che non si collega ferma il passo con `AccountSaveFailed`.
 - Scheda, data di nascita, fatturazione e indirizzo si salvano nella transazione della conferma: un errore annulla la registrazione.
 - Una sezione `required` che manca nella scheda fa passare dal secondo passo anche chi entra con un accesso federato (`requiresCompletion()`). Con sole sezioni `optional` l'accesso federato non le chiede.
 
@@ -76,10 +77,12 @@ Serve un profilo con i campi: `Auth\CustomerAuthProfile` (il profilo del core pi
 
 ## Per i moduli che si appoggiano alla scheda
 
-- `Account\ContactAccount::link($userId, $input)` collega l'utente a una scheda: riusa quella già collegata o una email non assegnata, rifiuta una scheda di un altro account. Va chiamato da `AuthProfile::afterUserSaved()` del progetto (ecommerce lo fa); l'auth generica non crea schede.
-- `Account\CustomerContact::forUser($userId)` restituisce la scheda (letta una volta per richiesta); `forget($userId)` la invalida dopo una scrittura.
+- `Account\ContactAccount::link($userId, $input)` collega l'utente a una scheda: riusa quella già collegata o una email non assegnata, rifiuta una scheda di un altro account (`contact_link_conflict`). Nome, cognome ed email della scheda diventano quelli dell'utente; il telefono solo se arriva pieno.
+- `Account\ContactAccount::linkKeepingIdentity($userId, $input)` fa lo stesso, ma una scheda che esiste già tiene nome, cognome, email e telefono: scrive solo `user_id`, `is_customer` e `active`. È per la scheda compilata da un ordine da ospite. Senza scheda la crea con i dati dell'utente.
+- Il collegamento avviene anche da solo: `CustomerContact::forUser()` crea la scheda che manca e `HasSignupFields::afterUserSaved()` la collega nella registrazione. Un profilo con il trait non lo rifà: chiama `parent::afterUserSaved()` e usa i due ganci `protected`, `linksContactOn($surface)` (su quali superfici collegare) e `afterContactLinked($userId, $contactId, $surface, $input)` (dopo il collegamento, prima dei campi del secondo passo). Su `email.verify` un collegamento fallito non lancia eccezioni né chiama `afterContactLinked()`: finisce nel log e si ritenta su `signup-completion`. Su `signup-completion` e `federated` lancia `AccountSaveFailed`. L'auth generica del core, senza il trait, non crea schede.
+- `Account\CustomerContact::forUser($userId)` restituisce la scheda (letta una volta per richiesta) e, se manca, la crea con `link()`: non è una lettura pura. `forget($userId)` la invalida dopo una scrittura.
 - `Account\Concerns\ManagesContact` dà ai controller del pannello `contact($userId)` e `contactErrors($contact)`.
-- `Account\AccountAddresses` e `Account\AccountBilling` leggono e salvano indirizzi e fatturazione con `AccountAddressValidation` del core.
+- `Account\AccountAddresses` e `Account\AccountBilling` leggono e salvano indirizzi e fatturazione con `AccountAddressValidation` del core, che vale sempre. Un nuovo indirizzo diventa il predefinito (`is_default`) se la scheda non ne ha già uno attivo: così si riparano anche le schede create prima, con indirizzi ma senza predefinito, al primo indirizzo aggiunto (la modifica di un indirizzo non tocca `is_default`). La posizione viene da `nextPosition()` (un solo `MAX`). Se si elimina il predefinito, lo diventa l'indirizzo rimasto con la posizione più bassa; la promozione arriva dopo l'eliminazione, fuori transazione, e se non riesce la scheda resta senza predefinito fino al prossimo indirizzo aggiunto.
 - I modelli si estendono come fa il gestionale, che aggiunge solo i campi commerciali.
 
 Un'estensione che lavora sulle righe o le voci di questo modulo deve registrarsi dopo di lui. I file di route dei moduli si caricano in ordine alfabetico di percorso, non di dipendenza: oggi `customer-account` precede `ecommerce` e `gestionale`; un modulo con un nome che lo precede non può contare sulle sue righe.

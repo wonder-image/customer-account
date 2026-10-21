@@ -108,12 +108,43 @@ trait HasSignupFields
         return [...$texts, ...(array_diff_key($own, ['birth_date' => true]) !== [] ? $this->signupMessages : [])];
     }
 
+    /**
+     * Collega la scheda con i dati dell'utente sulle superfici di `linksContactOn()`, poi chiama
+     * `afterContactLinked()` e, nella conferma, salva i campi del secondo passo.
+     * Su `email.verify` il collegamento è best effort (il token è già consumato): l'errore va nel log
+     * e la conferma lo rifà in transazione. Altrove una scheda che non si collega ferma il passo (`AccountSaveFailed`).
+     */
     public function afterUserSaved(int $userId, string $surface, array $input): void
     {
         parent::afterUserSaved($userId, $surface, $input);
-        if ($surface === 'signup-completion') {
-            $this->saveSignupFields($userId, $input);
+        if (!$this->linksContactOn($surface)) {
+            return;
         }
+        $link = ContactAccount::link($userId, $this->phoneEnabled() ? array_intersect_key($input, ['phone_prefix' => true, 'phone' => true]) : []);
+        $contactId = ($link->success ?? false) ? (int) ($link->contact_id ?? 0) : 0;
+        if ($contactId <= 0) {
+            if ($surface === 'email.verify') {
+                error_log('Customer account contact link failed on email.verify: '.(string) ($link->reason ?? 'unknown'));
+                return;
+            }
+            throw new AccountSaveFailed('contact');
+        }
+        $this->afterContactLinked($userId, $contactId, $surface, $input);
+        if ($surface === 'signup-completion') {
+            $this->saveSignupFields($userId, $input, $contactId);
+        }
+        CustomerContact::forget($userId);
+    }
+
+    /** Su quali superfici dell'auth si collega la scheda: mai su `signup-request`, l'email non è ancora verificata. */
+    protected function linksContactOn(string $surface): bool
+    {
+        return in_array($surface, ['email.verify', 'signup-completion', 'federated'], true);
+    }
+
+    /** Dopo il collegamento, prima dei campi del secondo passo: per i moduli che lavorano sulla scheda. */
+    protected function afterContactLinked(int $userId, int $contactId, string $surface, array $input): void
+    {
     }
 
     /** Con un campo richiesto della scheda che manca, anche l'accesso federato passa dal secondo passo. */

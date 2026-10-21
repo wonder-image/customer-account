@@ -28,4 +28,9 @@ Le convenzioni del framework sono in `vendor/wonder-image/app/AGENTS.md`.
 - Migrazioni solo in `database.migrations`, idempotenti, con
   `LegacyTableRenames`; niente drop né merge.
 - Nessun alias dei vecchi namespace del core.
-- Test: `WI_APP=<app> php tests/run.php`. Vedi `README.md`.
+- Collegamento della scheda: `ContactAccount::link()` (riscrive l'identità) o
+  `linkKeepingIdentity()` (la tiene). Nella registrazione lo fa
+  `HasSignupFields::afterUserSaved()`; i profili che usano il trait chiamano
+  `parent::` e personalizzano con `linksContactOn()` / `afterContactLinked()`.
+- Test: `WI_APP=<app> php tests/run.php`. Chi passa dai Model richiede prima
+  `tests/support/FakeDb.php` (database in memoria). Vedi `README.md`.

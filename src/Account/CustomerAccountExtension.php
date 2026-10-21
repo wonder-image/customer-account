@@ -8,6 +8,7 @@ use Wonder\Auth\Frontend\AccountModal;
 use Wonder\Auth\Frontend\AccountOverview;
 use Wonder\Auth\Frontend\AccountRoutes;
 use Wonder\Auth\Frontend\AccountSaveFailed;
+use Wonder\Auth\Frontend\AuthValidator;
 use Wonder\Auth\Frontend\BaseAccountExtension;
 use Wonder\Http\Route;
 use Wonder\Plugin\CustomerAccount\CustomerAccount;
@@ -110,7 +111,7 @@ class CustomerAccountExtension extends BaseAccountExtension
         ]);
 
         if (!isset($values['phone']) && trim((string) ($contact['phone'] ?? '')) !== '' && isset($fields['phone'])) {
-            $fields['phone']->value(self::localPhone((string) $contact['phone'], (string) ($contact['phone_prefix'] ?? '+39')));
+            $fields['phone']->value(AuthValidator::localPhone((string) $contact['phone'], (string) ($contact['phone_prefix'] ?? AuthValidator::defaultPrefix())));
         }
         if (!isset($values['phone_prefix']) && trim((string) ($contact['phone_prefix'] ?? '')) !== '' && isset($fields['phone_prefix'])) {
             $fields['phone_prefix']->value((string) $contact['phone_prefix']);
@@ -192,19 +193,6 @@ class CustomerAccountExtension extends BaseAccountExtension
     private function billing(array $contact): bool
     {
         return AccountRoutes::panel()->enabled('billing') && (int) ($contact['id'] ?? 0) > 0;
-    }
-
-    /** Il telefono della scheda è canonico (`+39333…`): nel campo va solo il numero, dopo il prefisso. */
-    private static function localPhone(string $phone, string $prefix): string
-    {
-        if (str_starts_with(trim($phone), '+')) {
-            $digits = (string) preg_replace('/\D+/', '', $phone);
-            $prefixDigits = (string) preg_replace('/\D+/', '', $prefix);
-            if ($prefixDigits !== '' && str_starts_with($digits, $prefixDigits)) {
-                return substr($digits, strlen($prefixDigits));
-            }
-        }
-        return $phone;
     }
 
     /** Inserisce `$own` dopo la chiave `$after`, o in coda se non c'è. */

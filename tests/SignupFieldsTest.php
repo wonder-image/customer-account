@@ -1,7 +1,8 @@
 <?php
-/** php tests/SignupFieldsTest.php — campi della registrazione decisi dal sito: stati, campi e validazione (nessun database). */
+/** php tests/SignupFieldsTest.php — campi della registrazione decisi dal sito: stati, campi, validazione e collegamento della scheda (database finto). */
 declare(strict_types=1);
 
+require __DIR__.'/support/FakeDb.php';
 require __DIR__.'/bootstrap.php';
 require_once WI_APP_ROOT.'/app/function/other/geo.php';
 
@@ -13,6 +14,23 @@ final class ProfiloConfigurato extends CustomerAuthProfile
 {
     public function __construct(private array $states) {}
     public function signupFields(): array { return SignupFields::resolve($this->states); }
+}
+
+/** Un modulo che si appoggia alla scheda: registra le chiamate e può spegnere il collegamento su una superficie. */
+final class ProfiloDelModulo extends CustomerAuthProfile
+{
+    public array $linked = [];
+    public function __construct(private array $states = [], private array $skip = []) {}
+    public function signupFields(): array { return SignupFields::resolve($this->states); }
+    protected function linksContactOn(string $surface): bool
+    {
+        return !in_array($surface, $this->skip, true) && parent::linksContactOn($surface);
+    }
+    protected function afterContactLinked(int $userId, int $contactId, string $surface, array $input): void
+    {
+        $this->linked[] = [$userId, $contactId, $surface];
+    }
+    public function salvaCampi(int $userId, array $input): void { $this->saveSignupFields($userId, $input); }
 }
 
 $base = ['name' => 'Ada', 'surname' => 'Lovelace', 'email' => 'ada@example.com', 'password' => 'Password-sicura-1', 'password_confirmation' => 'Password-sicura-1', 'privacy' => 'true', 'csrf_token' => 'x'];
@@ -85,6 +103,97 @@ check('i campi accesi si rendono nel tema del frontend', function () use ($base)
     }
     return str_contains($html, 'name="birth_date"') && str_contains($html, 'name="street"')
         && str_contains($html, 'name="shipping_street"') && str_contains($html, '<h3 class="text fw-600">account.signup.billing</h3>');
+});
+
+$GLOBALS['__fake_users'] = [['id' => 7, 'email' => 'ada@example.com', 'name' => 'Ada', 'surname' => 'Lovelace']];
+
+check('signup-request: la scheda non si collega, l\'email non è verificata', function () {
+    \Wonder\Sql\Query::reset();
+    $profile = new ProfiloDelModulo();
+    $profile->afterUserSaved(7, 'signup-request', []);
+    return $profile->linked === [] && \Wonder\Sql\Query::$writes === [];
+});
+
+check('email.verify e federated: scheda collegata con i dati dell\'utente, poi il gancio', function () {
+    foreach (['email.verify', 'federated'] as $surface) {
+        \Wonder\Sql\Query::reset();
+        $profile = new ProfiloDelModulo();
+        $profile->afterUserSaved(7, $surface, []);
+        $contact = \Wonder\Sql\Query::$tables['contacts'][1] ?? [];
+        if ($profile->linked !== [[7, 1, $surface]] || ($contact['name'] ?? '') !== 'Ada' || (int) ($contact['user_id'] ?? 0) !== 7) {
+            return false;
+        }
+    }
+    return true;
+});
+
+check('signup-completion: collegamento, gancio e primo indirizzo predefinito nella stessa scheda', function () use ($shipping) {
+    \Wonder\Sql\Query::reset();
+    $profile = new ProfiloDelModulo(['phone' => 'optional', 'shipping_address' => 'required']);
+    $profile->afterUserSaved(7, 'signup-completion', $shipping + ['phone_prefix' => '+39', 'phone' => '333 1234567']);
+    $contact = \Wonder\Sql\Query::$tables['contacts'][1] ?? [];
+    $address = \Wonder\Sql\Query::$tables['contact_addresses'][1] ?? [];
+    return $profile->linked === [[7, 1, 'signup-completion']] && ($contact['phone'] ?? '') === '3331234567'
+        && (int) ($address['contact_id'] ?? 0) === 1 && ($address['is_default'] ?? '') === 'true' && ($address['street'] ?? '') === 'Via Roma';
+});
+
+check('il modulo spegne una superficie: niente collegamento e niente gancio', function () {
+    \Wonder\Sql\Query::reset();
+    $profile = new ProfiloDelModulo([], ['email.verify']);
+    $profile->afterUserSaved(7, 'email.verify', []);
+    return $profile->linked === [] && \Wonder\Sql\Query::$writes === [];
+});
+
+$conflict = ['contacts' => [3 => ['id' => 3, 'deleted' => 'false', 'email' => 'ada@example.com', 'user_id' => 8]]];
+
+check('email.verify con la scheda di un altro utente: nessuna eccezione, nessun gancio, errore nel log', function () use ($conflict) {
+    \Wonder\Sql\Query::reset($conflict);
+    $log = tempnam(sys_get_temp_dir(), 'ca-log');
+    $previous = ini_set('error_log', $log);
+    $profile = new ProfiloDelModulo();
+    try {
+        $profile->afterUserSaved(7, 'email.verify', []);
+    } catch (\Throwable) {
+        return false;
+    } finally {
+        ini_set('error_log', (string) $previous);
+    }
+    $logged = (string) file_get_contents($log);
+    unlink($log);
+    return $profile->linked === [] && \Wonder\Sql\Query::$writes === [] && str_contains($logged, 'contact_link_conflict');
+});
+
+check('signup-completion e federated con la scheda di un altro utente: AccountSaveFailed e nessun gancio', function () use ($conflict) {
+    foreach (['signup-completion', 'federated'] as $surface) {
+        \Wonder\Sql\Query::reset($conflict);
+        $profile = new ProfiloDelModulo();
+        try {
+            $profile->afterUserSaved(7, $surface, []);
+            return false;
+        } catch (\Wonder\Auth\Frontend\AccountSaveFailed) {
+            if ($profile->linked !== [] || \Wonder\Sql\Query::$writes !== []) {
+                return false;
+            }
+        }
+    }
+    return true;
+});
+
+check('saveSignupFields() chiamato da solo con la scheda di un altro utente: AccountSaveFailed, nessun warning', function () use ($conflict) {
+    \Wonder\Sql\Query::reset($conflict);
+    set_error_handler(static function (int $level, string $message): never {
+        throw new \ErrorException($message, 0, $level);
+    });
+    try {
+        (new ProfiloDelModulo(['birth_date' => 'optional']))->salvaCampi(7, ['birth_date' => '1990-04-02']);
+        return false;
+    } catch (\Wonder\Auth\Frontend\AccountSaveFailed) {
+        return \Wonder\Sql\Query::$writes === [];
+    } catch (\Throwable) {
+        return false;
+    } finally {
+        restore_error_handler();
+    }
 });
 
 summary();

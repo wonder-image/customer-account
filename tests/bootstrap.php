@@ -1,7 +1,7 @@
 <?php
 /**
  * Avvio dei test del modulo: il framework viene da `WI_APP` (un checkout di wonder-image/app con vendor),
- * altrimenti da `../app` accanto al modulo. Nessun database: i test che servono il sito sono nei moduli che lo usano.
+ * altrimenti da `../app` accanto al modulo. Nessun database vero: chi passa dai Model richiede prima `support/FakeDb.php`.
  */
 declare(strict_types=1);
 

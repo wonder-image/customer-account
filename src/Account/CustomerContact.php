@@ -13,6 +13,7 @@ final class CustomerContact
     /** @var array<int, array> */
     private static array $memo = [];
 
+    /** Se l'utente non ha una scheda la crea (o la collega per email) con `ContactAccount::link()`: non è una lettura pura. */
     public static function forUser(int $userId): array
     {
         if ($userId <= 0) {
