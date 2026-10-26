@@ -17,7 +17,7 @@
 ### Changed
 
 - Pannello: il telefono della scheda nel campo usa `AuthValidator::localPhone()` e `defaultPrefix()` del core al posto di una copia privata. Richiede wonder-image/app con questi metodi (branch `fix/2026-10-1`, non ancora su `main`).
-- Indirizzi del pannello con la pagina scaduta (token non valido): l'editor nuovo o di modifica si riapre con l'avviso generico 929 e i valori scritti (`Csrf::oldInput`, password e token vuoti); l'eliminazione torna all'elenco con il flash 929. Niente più 419 con testo tecnico. Override di `renderCsrfFailure()`; richiede wonder-image/app#128 (`Csrf::ALERT`, `oldInput()`, `flashFailure()`).
+- Indirizzi del pannello con la pagina scaduta (token non valido): l'editor nuovo o di modifica si riapre con l'avviso generico 929 e i valori scritti (`Csrf::oldInput`, password e token vuoti); l'eliminazione torna all'elenco con il flash 929. Niente più 419 con testo tecnico. Override di `renderCsrfFailure()`; richiede wonder-image/app `^2.4.0-beta.5` (da app#128: `Csrf::ALERT`, `oldInput()`, `flashFailure()`).
 - Contatti e indirizzi dal pannello: il CSRF è quello del core (`_csrf`, emesso dalla pagina del form). Con il core da `main` (beta.4) lo verifica anche `ResourcePageController` prima di `mutateRequestValues()`; con beta.3 lo controlla solo `verifyFormToken()`, che resta come difesa locale con `Csrf::verify()` e lo stesso messaggio `contacts.csrf`.
 
 ### Removed
