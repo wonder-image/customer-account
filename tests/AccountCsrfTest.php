@@ -17,6 +17,7 @@ if (($argv[1] ?? '') !== '--scenario') {
     $secret = ['password' => 'segreta-1', 'password_confirmation' => 'segreta-1', 'csrf_token' => 'vecchio-1', 'logout_token' => 'vecchio-2'];
     // Nessun segreto, nessun token scaduto e nessuna parola tecnica nell'HTML reso.
     $clean = static fn (array $r): bool => preg_match('/segreta-1|vecchio-1|vecchio-2|scaduto/', (string) ($r['html'] ?? '')) !== 1
+        && preg_match('/csrf|token/i', strip_tags((string) ($r['html'] ?? ''))) !== 1
         && preg_match('/csrf|token/i', (string) json_encode([$r['errors'] ?? null, $r['flash'] ?? null])) !== 1;
 
     $new = $run('create', $address + $secret);
@@ -63,7 +64,7 @@ if (($argv[1] ?? '') !== '--scenario') {
     );
 
     $billing = $run('personal', ['form' => 'billing', 'name' => 'Ada'] + $secret);
-    check('fatturazione (azione del core) → modal «billing» riaperto con il 929 e il toast, nessun salvataggio', fn () =>
+    check('fatturazione (azione del core) → il core riceve open=billing, il 929 e i valori senza password, più il toast; nessun salvataggio', fn () =>
         ($billing['personal']['open'] ?? null) === 'billing' && ($billing['personal']['errors'] ?? null) === ['notifications.929.text']
         && ($billing['personal']['values']['name'] ?? null) === 'Ada' && ($billing['personal']['values']['password'] ?? null) === ''
         && ($billing['alert'] ?? null) === 929 && ($billing['writes'] ?? null) === [] && ($billing['after'] ?? null) === false
