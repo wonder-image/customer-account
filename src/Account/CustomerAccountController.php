@@ -5,6 +5,7 @@ namespace Wonder\Plugin\CustomerAccount\Account;
 use Wonder\Auth\Frontend\AccountAddressForm;
 use Wonder\Auth\Frontend\AccountController;
 use Wonder\Auth\Frontend\AccountModal;
+use Wonder\Http\Csrf;
 use Wonder\Http\Route;
 use Wonder\Plugin\CustomerAccount\Account\Concerns\ManagesContact;
 use Wonder\Plugin\CustomerAccount\CustomerAccount;
@@ -15,8 +16,12 @@ class CustomerAccountController extends AccountController
 {
     use ManagesContact;
 
+    /** L'indirizzo dell'editor in corso (`null` = nuovo): il modal da riaprire se il token è scaduto. */
+    private ?int $addressId = null;
+
     public function handle(string $action, array $parameters = []): void
     {
+        $this->action = $action;
         match ($action) {
             'addresses' => $this->addresses(),
             'addresses.create' => $this->addressEditor(null),
@@ -93,6 +98,7 @@ class CustomerAccountController extends AccountController
         if ($id !== null) {
             $row = AccountAddresses::find($contactId, $id) ?? $this->notFound();
         }
+        $this->addressId = $id;
 
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             $this->requireCsrf();
@@ -134,6 +140,29 @@ class CustomerAccountController extends AccountController
         }
         $this->flash((string) __t('account.addresses.deleted'));
         $this->redirect(Route::url('account.addresses'));
+    }
+
+    /** Token scaduto sugli indirizzi: l'editor si riapre con l'avviso e i valori scritti; l'eliminazione torna all'elenco. */
+    protected function renderCsrfFailure(): void
+    {
+        switch ($this->action) {
+            case 'addresses.create':
+            case 'addresses.edit':
+                // Senza scheda non c'è il modal da riaprire: resta il toast.
+                if ((int) ($this->contact((int) $this->user()->id)['id'] ?? 0) <= 0) {
+                    $GLOBALS['ALERT'] = Csrf::ALERT;
+                    $this->renderAddresses('', [], []);
+                    return;
+                }
+                $open = $this->addressId === null ? 'new' : (string) $this->addressId;
+                $this->renderAddresses($open, [Csrf::failureMessage()], Csrf::oldInput($this->post()));
+                return;
+            case 'addresses.delete':
+                Csrf::flashFailure();
+                $this->redirect(Route::url('account.addresses'));
+            default:
+                parent::renderCsrfFailure();
+        }
     }
 
     /** La fatturazione sta in «Dati personali»: il suo vecchio indirizzo porta lì. */
