@@ -196,4 +196,31 @@ check('saveSignupFields() chiamato da solo con la scheda di un altro utente: Acc
     }
 });
 
+// Token scaduto: il core rimanda al form `Csrf::oldInput($_POST)`. `csrf_token` resta come chiave vuota, quindi il form
+// risulta inviato (HasSignupFields) e non si ricarica da infoUser; senza la chiave si ripartirebbe dai dati dell'utente.
+check('token scaduto sul secondo passo: campi ripopolati, password vuota, form ancora «inviato»', function () {
+    \Wonder\App\Theme::set('wonder');
+    $users = $GLOBALS['__fake_users'];
+    $GLOBALS['__fake_users'] = [['id' => 7, 'email' => 'ada@example.com', 'name' => 'DaInfoUser', 'surname' => 'DaInfoUser']];
+    $profile = new ProfiloConfigurato(['birth_date' => 'optional', 'billing' => 'optional', 'shipping_address' => 'required']);
+    $post = ['email' => 'ada@example.com', 'password' => 'Password-sicura-1', 'password_confirmation' => 'Password-sicura-1', 'csrf_token' => 'vecchio-1',
+        'street' => 'Via Fattura', 'birth_date' => '1990-04-02', 'shipping_country' => 'IT', 'shipping_street' => 'Via Roma', 'shipping_city' => 'Milano'];
+    $render = static function (array $values) use ($profile): string {
+        $html = '';
+        foreach ($profile->fields('signup-completion', $values) as $field) {
+            $html .= (string) $field;
+        }
+        return $html;
+    };
+    $old = \Wonder\Http\Csrf::oldInput($post);
+    $html = $render($old);
+    $withoutKey = $render(array_diff_key($old, ['csrf_token' => true]));
+    $GLOBALS['__fake_users'] = $users;
+    return array_key_exists('csrf_token', $old) && $old['csrf_token'] === '' && $old['password'] === '' && $old['password_confirmation'] === ''
+        && str_contains($html, 'name="street" value="Via Fattura"') && str_contains($html, 'name="shipping_street" value="Via Roma"')
+        && str_contains($html, 'name="shipping_city" value="Milano"') && str_contains($html, 'name="birth_date" value="1990-04-02"')
+        && preg_match('/Password-sicura-1|vecchio-1/', $html) !== 1
+        && !str_contains($html, 'DaInfoUser') && str_contains($withoutKey, 'DaInfoUser');
+});
+
 summary();
