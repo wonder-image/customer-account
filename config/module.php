@@ -14,4 +14,12 @@ return [
          */
         'fields' => [],
     ],
+
+    /*
+     * Referenti delle aziende (`contact_relations`): un'azienda con più persone, una persona
+     * in più aziende. Spento non compare nulla; la tabella esiste comunque.
+     */
+    'relations' => [
+        'enabled' => false,
+    ],
 ];

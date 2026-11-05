@@ -75,6 +75,24 @@ Serve un profilo con i campi: `Auth\CustomerAuthProfile` (il profilo del core pi
 
 `ContactResource` esporta in Excel (.xlsx) e CSV dal bottone «Esporta» della tabella. Le colonne vengono da `Support\ContactExport::columns()`, condivise con le Resource del gestionale sulla stessa tabella: anagrafica, recapiti, fatturazione, stato e data di creazione. Le celle escono come testo (`downloadAsText()` del core): niente formule, zeri iniziali di CAP e telefoni intatti. L'export prende tutte le righe della `querySchema()` della Resource, non i filtri della tabella.
 
+## Referenti delle aziende
+
+Un'azienda (scheda `business`) può avere più referenti, e una persona (scheda `private`) può stare in più aziende. Il legame è la tabella `contact_relations` (`Models\ContactRelation`): `company_id`, `person_id`, `job_title`, `is_primary`, `receives_documents`, `position`, `deleted`. Ogni coppia azienda/persona compare una volta sola, anche fra le righe cancellate: chi la ricollega riprende la riga di prima.
+
+Si attiva dal sito in `custom/config/modules/customer-account.php`:
+
+```php
+return ['relations' => ['enabled' => true]];
+```
+
+Spento (il default), la tabella esiste lo stesso dopo `forge update`, ma resta vuota: nessun form, lista o documento ne parla.
+
+- Acceso, `ContactResource` mostra il repeater «Referenti» sulle schede business e «Aziende» sulle schede private. Una riga dei referenti sceglie una persona esistente o ne crea una con nome, cognome ed email facoltativa: la nuova scheda è privata, attiva, non cliente e senza accesso. Se la creazione non riesce (per esempio un'email non valida), la riga si scarta senza errore.
+- Al massimo un referente principale per azienda: un nuovo principale, anche dal lato della persona, toglie il titolo agli altri.
+- I repeater si salvano solo se il form li ha mostrati (campo nascosto `contact_relations_form`): un salvataggio da API o da un form senza repeater non tocca i legami.
+- `Support\ContactRelations::peopleOf($companyId)` e `companiesOf($personId)` danno le righe vive in ordine, con la scheda dell'altro lato sotto `contact`. `enabled()` dice se l'interruttore è acceso.
+- Una Resource sulla tabella dei contatti prende i repeater con il trait `Resources\Concerns\HasContactRelations` (`...static::contactRelationFields()` nel `formSchema()`). Il gancio `relationPersonPayload(array $values)` ritocca i valori della persona creata al volo.
+
 ## Per i moduli che si appoggiano alla scheda
 
 - `Account\ContactAccount::link($userId, $input)` collega l'utente a una scheda: riusa quella già collegata o una email non assegnata, rifiuta una scheda di un altro account (`contact_link_conflict`). Nome, cognome ed email della scheda diventano quelli dell'utente; il telefono solo se arriva pieno.
