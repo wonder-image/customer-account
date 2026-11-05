@@ -15,6 +15,8 @@ if (!function_exists('sqlSelect')) {
     function sqlDelete($table, $condition = null) { return (new Query)->Delete($table, $condition); }
 }
 use Wonder\Plugin\CustomerAccount\Resources\ContactResource;
+use Wonder\Plugin\CustomerAccount\Support\ContactEvents;
+use Wonder\Plugin\CustomerAccount\Support\ContactRecord;
 use Wonder\Plugin\CustomerAccount\Support\ContactRelations;
 
 $contact = static fn (int $id, string $type, array $extra = []): array => ['id' => $id, 'type' => $type, 'deleted' => 'false', 'active' => 'true'] + $extra;
@@ -145,6 +147,73 @@ check('sync dal lato persona: diventare principale toglie il titolo agli altri',
 
     return count($companies) === 1 && (int) $companies[0]['company_id'] === 1
         && Query::$tables['contact_relations'][1]['is_primary'] === 'false';
+});
+
+check('eventi: sync emette linked e unlinked, createPerson emette created', function () use ($contacts) {
+    Query::reset(['contacts' => $contacts(), 'contact_relations' => [
+        1 => ['id' => 1, 'company_id' => 1, 'person_id' => 3, 'is_primary' => 'false', 'receives_documents' => 'false', 'position' => 1, 'deleted' => 'false'],
+    ]]);
+    ContactEvents::reset();
+    $seen = [];
+    foreach (ContactEvents::EVENTS as $event) {
+        ContactEvents::listen($event, function (string $name, array $payload) use (&$seen) {
+            $seen[] = $name.':'.($payload['person_id'] ?? $payload['id'] ?? 0);
+        });
+    }
+    ContactRelations::sync(ContactRelations::COMPANY, 1, [
+        ['person_id' => '2'],
+        ['person_id' => '', 'new_name' => 'Marta'],
+    ]);
+    ContactEvents::reset();
+    sort($seen);
+
+    return $seen === ['contact.created:5', 'contact.linked:2', 'contact.linked:5', 'contact.unlinked:3'];
+});
+
+check('eventi: un ascoltatore che lancia non ferma il salvataggio né gli altri', function () use ($contacts) {
+    Query::reset(['contacts' => $contacts(), 'contact_relations' => []]);
+    ContactEvents::reset();
+    $called = false;
+    ContactEvents::listen(ContactEvents::LINKED, function () { throw new RuntimeException('crm giù'); });
+    ContactEvents::listen(ContactEvents::LINKED, function () use (&$called) { $called = true; });
+    $log = ini_set('error_log', '/dev/null');
+    ContactRelations::sync(ContactRelations::COMPANY, 1, [['person_id' => '2']]);
+    ini_set('error_log', (string) $log);
+    ContactEvents::reset();
+
+    return $called && array_map('intval', array_column(ContactRelations::peopleOf(1), 'person_id')) === [2];
+});
+
+check('ContactRecord::from: campi, legami, id esterni e consensi', function () use ($contacts) {
+    Query::reset([
+        'contacts' => [1 => $contacts()[1] + ['email' => 'info@rossi.test', 'user_id' => 8]] + $contacts(),
+        'contact_relations' => [
+            1 => ['id' => 1, 'company_id' => 1, 'person_id' => 2, 'job_title' => 'Acquisti', 'is_primary' => 'true', 'receives_documents' => 'true', 'position' => 1, 'deleted' => 'false'],
+            2 => ['id' => 2, 'company_id' => 1, 'person_id' => 3, 'is_primary' => 'false', 'receives_documents' => 'false', 'position' => 2, 'deleted' => 'true'],
+        ],
+        'external_references' => [
+            1 => ['id' => 1, 'entity_type' => 'contacts', 'entity_id' => 1, 'provider' => 'hubspot', 'environment' => 'live', 'object_type' => 'company', 'external_id' => 'hs-1', 'synced_at' => '', 'deleted' => 'false'],
+        ],
+    ]);
+    ContactRecord::useConsents(fn (int $userId): array => $userId === 8 ? ['newsletter' => 'granted'] : []);
+    $record = ContactRecord::from(1);
+    ContactRecord::useConsents(null);
+
+    return $record['schema'] === ContactRecord::SCHEMA && $record['business_name'] === 'Rossi srl'
+        && $record['email'] === 'info@rossi.test' && $record['cap'] === ''
+        && $record['relations'] === [['person_id' => 2, 'job_title' => 'Acquisti', 'is_primary' => true, 'receives_documents' => true]]
+        && ($record['external_ids'][0]['external_id'] ?? '') === 'hs-1'
+        && $record['consents'] === ['newsletter' => 'granted']
+        && json_encode($record) !== false && ContactRecord::from(99) === null;
+});
+
+check('ContactRecord: fromArray tiene i campi noti, validate dà gli errori', function () {
+    $record = ContactRecord::fromArray([' type ' => 'x', 'type' => ' Business ', 'business_name' => ' Rossi ', 'email' => 'INFO@ROSSI.TEST', 'password' => 'no']);
+    $bad = ContactRecord::validate(ContactRecord::fromArray(['type' => 'private', 'email' => 'non-email', 'relations' => [['company_id' => 0]]]));
+
+    return $record === ['type' => 'business', 'business_name' => 'Rossi', 'email' => 'info@rossi.test']
+        && ContactRecord::validate($record) === []
+        && $bad === ['name' => 'required', 'email' => 'invalid', 'relations.0' => 'invalid'];
 });
 
 summary();

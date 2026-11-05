@@ -2,6 +2,8 @@
 
 namespace Wonder\Plugin\CustomerAccount\Support;
 
+use Wonder\App\Support\Repeater;
+use Wonder\App\ResourceSchema\RepeaterRelation;
 use Wonder\Plugin\CustomerAccount\CustomerAccount;
 use Wonder\Plugin\CustomerAccount\Models\Contact;
 use Wonder\Plugin\CustomerAccount\Models\ContactRelation;
@@ -206,9 +208,69 @@ final class ContactRelations
 
         if (($result->success ?? false) && (int) ($result->insert_id ?? 0) > 0) {
             $row[self::PERSON] = (int) $result->insert_id;
+            ContactEvents::dispatch(ContactEvents::CREATED, [
+                'id' => $row[self::PERSON],
+                'contact' => Contact::findById($row[self::PERSON]) ?: $values,
+            ]);
         }
 
         return $row;
+    }
+
+    /**
+     * L'unico punto che scrive i legami di una scheda: form, API, import e sync
+     * passano da qui.
+     *
+     * `$rows` sono le righe grezze dell'altro lato (`person_id` o `company_id`,
+     * `job_title`, `is_primary`, `receives_documents`; dal lato azienda anche
+     * `new_name`, `new_surname`, `new_email` per creare la persona). Le righe non
+     * presenti si cancellano (soft delete). Emette `ContactEvents::LINKED` e
+     * `UNLINKED` per le coppie che cambiano, `CREATED` per le persone nuove.
+     *
+     * @param list<array<string, mixed>> $rows
+     * @param callable(array<string, mixed>): array<string, mixed>|null $payload ritocca la persona creata
+     * @return array<string, mixed> il riepilogo di `Repeater::syncRelatedRows()`
+     */
+    public static function sync(string $parentColumn, int $parentId, array $rows, ?callable $payload = null): array
+    {
+        if ($parentId <= 0 || !in_array($parentColumn, [self::COMPANY, self::PERSON], true)) {
+            return [];
+        }
+
+        $other = self::counterpart($parentColumn);
+
+        if ($parentColumn === self::COMPANY) {
+            $rows = array_map(static fn (array $row): array => self::createPerson($row, $payload), $rows);
+        }
+
+        $before = self::liveByCounterpart($parentColumn, $parentId);
+        $types = self::typesOf(array_map(static fn (array $row): int => (int) ($row[$other] ?? 0), $rows));
+        $clean = self::normalize($rows, self::allRowsOf($parentColumn, $parentId), $parentColumn, $parentId, $types);
+        $relation = RepeaterRelation::make(ContactRelation::$table, $parentColumn)
+            ->model(ContactRelation::class)
+            ->positionKey('position')
+            ->softDelete(true);
+        $summary = Repeater::syncRelatedRows($relation, $parentId, $clean);
+
+        if ($parentColumn === self::PERSON) {
+            foreach ($clean as $row) {
+                if ($row['is_primary'] === 'true') {
+                    self::demoteOtherPrimaries((int) $row[self::COMPANY], $parentId);
+                }
+            }
+        }
+
+        $after = self::liveByCounterpart($parentColumn, $parentId);
+
+        foreach (array_diff_key($after, $before) as $row) {
+            ContactEvents::dispatch(ContactEvents::LINKED, self::eventPayload($row));
+        }
+
+        foreach (array_diff_key($before, $after) as $row) {
+            ContactEvents::dispatch(ContactEvents::UNLINKED, self::eventPayload(['deleted' => 'true'] + $row));
+        }
+
+        return $summary;
     }
 
     /**
@@ -222,6 +284,29 @@ final class ContactRelations
                 ContactRelation::query()->Update(ContactRelation::$table, ['is_primary' => 'false'], 'id', (int) $row['id']);
             }
         }
+    }
+
+    /** @return array<int, array<string, mixed>> le righe vive per id della controparte */
+    private static function liveByCounterpart(string $parentColumn, int $parentId): array
+    {
+        $other = self::counterpart($parentColumn);
+        $out = [];
+
+        foreach (self::rows(ContactRelation::find([$parentColumn => $parentId, 'deleted' => 'false'])) as $row) {
+            $out[(int) ($row[$other] ?? 0)] = $row;
+        }
+
+        return $out;
+    }
+
+    /** @return array<string, mixed> */
+    private static function eventPayload(array $row): array
+    {
+        return [
+            self::COMPANY => (int) ($row[self::COMPANY] ?? 0),
+            self::PERSON => (int) ($row[self::PERSON] ?? 0),
+            'relation' => $row,
+        ];
     }
 
     /** @return list<array<string, mixed>> */

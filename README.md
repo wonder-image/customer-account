@@ -92,6 +92,43 @@ Spento (il default), la tabella esiste lo stesso dopo `forge update`, ma resta v
 - I repeater si salvano solo se il form li ha mostrati (campo nascosto `contact_relations_form`): un salvataggio da API o da un form senza repeater non tocca i legami.
 - `Support\ContactRelations::peopleOf($companyId)` e `companiesOf($personId)` danno le righe vive in ordine, con la scheda dell'altro lato sotto `contact`. `enabled()` dice se l'interruttore è acceso.
 - Una Resource sulla tabella dei contatti prende i repeater con il trait `Resources\Concerns\HasContactRelations` (`...static::contactRelationFields()` nel `formSchema()`). Il gancio `relationPersonPayload(array $values)` ritocca i valori della persona creata al volo.
+- `Support\ContactRelations::sync($parentColumn, $parentId, $rows)` è l'unico punto che scrive i legami: i repeater, un'API, un import o una sync ci passano. Le righe assenti si cancellano (soft delete).
+
+## Integrazioni (export, import, sync)
+
+Il modulo non contiene connettori per CRM o newsletter: dà i ganci per scriverli nel sito o in un modulo.
+
+**Eventi** (`Support\ContactEvents`):
+
+| Evento | Quando | Payload |
+|---|---|---|
+| `contact.created` | scheda creata dal backend o persona creata al volo da un referente | `id`, `contact` |
+| `contact.updated` | scheda salvata dal backend | `id`, `contact` |
+| `contact.linked` | nuovo legame azienda/persona (anche una riga cancellata che torna viva) | `company_id`, `person_id`, `relation` |
+| `contact.unlinked` | legame tolto | `company_id`, `person_id`, `relation` |
+
+Gli ascoltatori si registrano in codice con `ContactEvents::listen($evento, $callable)` oppure dal sito:
+
+```php
+// custom/config/modules/customer-account.php
+return [
+    'events' => [
+        'listeners' => [
+            'contact.updated' => [\App\Crm\PushContact::class], // handle($evento, $payload) o __invoke
+        ],
+    ],
+];
+```
+
+Un ascoltatore riceve `($evento, $payload)`. Se lancia un'eccezione, l'errore finisce nel log e il salvataggio prosegue. Un ascoltatore lento rallenta il salvataggio: per una chiamata esterna conviene accodare un lavoro (scheduler del core) e farlo lì.
+
+**Forma stabile della scheda** (`Support\ContactRecord`):
+
+- `from($contactOrId)` dà un array serializzabile con `schema` (oggi `1`), `id`, i campi di `ContactExport::FIELDS`, `active`, `relations` (legami vivi: id dell'altro lato, `job_title`, `is_primary`, `receives_documents`), `external_ids` (righe di `external_references` con `entity_type = contacts`: `provider`, `environment`, `object_type`, `external_id`, `synced_at`) e `consents` (stato corrente dei consensi dell'utente collegato, dal registro del core). È la base per un export o un payload verso un CRM.
+- `fromArray($input)` porta un record in ingresso agli stessi campi, ripuliti; le chiavi assenti restano assenti, così un import parziale non svuota la scheda.
+- `validate($record)` dà gli errori (campo → `required` / `invalid`) con le regole di base: tipo, ragione sociale o nome, formato di email e PEC, legami e id esterni completi.
+
+L'id di un sistema esterno si salva in `external_references` (modello `ExternalReference` del core), non in una colonna nuova della scheda. I consensi restano quelli del core: il modulo non ne aggiunge.
 
 ## Per i moduli che si appoggiano alla scheda
 

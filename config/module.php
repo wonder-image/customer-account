@@ -22,4 +22,13 @@ return [
     'relations' => [
         'enabled' => false,
     ],
+
+    /*
+     * Ascoltatori degli eventi della rubrica (`Support\ContactEvents`): punto di aggancio per
+     * export, import e sync verso CRM o newsletter. `[evento => [callable o classe]]`, per
+     * esempio `['contact.linked' => [App\Crm\SyncContact::class]]`.
+     */
+    'events' => [
+        'listeners' => [],
+    ],
 ];

@@ -211,29 +211,11 @@ trait HasContactRelations
 
     protected static function syncContactRelations(RepeaterRelation $relation, string $inputName, int $parentId, array $post, array $files): array
     {
-        $parentColumn = $relation->parentKey;
-        $other = ContactRelations::counterpart($parentColumn);
-        $rows = Repeater::rowsFromRequest($inputName, $post, $files);
-
-        if ($parentColumn === ContactRelations::COMPANY) {
-            $rows = array_map(
-                static fn (array $row): array => ContactRelations::createPerson($row, static fn (array $values): array => static::relationPersonPayload($values)),
-                $rows
-            );
-        }
-
-        $types = ContactRelations::typesOf(array_map(static fn (array $row): int => (int) ($row[$other] ?? 0), $rows));
-        $clean = ContactRelations::normalize($rows, ContactRelations::allRowsOf($parentColumn, $parentId), $parentColumn, $parentId, $types);
-        $summary = Repeater::syncRelatedRows($relation, $parentId, $clean);
-
-        if ($parentColumn === ContactRelations::PERSON) {
-            foreach ($clean as $row) {
-                if ($row['is_primary'] === 'true') {
-                    ContactRelations::demoteOtherPrimaries((int) $row[ContactRelations::COMPANY], $parentId);
-                }
-            }
-        }
-
-        return $summary;
+        return ContactRelations::sync(
+            $relation->parentKey,
+            $parentId,
+            Repeater::rowsFromRequest($inputName, $post, $files),
+            static fn (array $values): array => static::relationPersonPayload($values)
+        );
     }
 }
