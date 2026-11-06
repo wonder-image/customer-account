@@ -4,7 +4,6 @@ namespace Wonder\Plugin\CustomerAccount\Support;
 
 use Wonder\App\Support\Repeater;
 use Wonder\App\ResourceSchema\RepeaterRelation;
-use Wonder\Plugin\CustomerAccount\CustomerAccount;
 use Wonder\Plugin\CustomerAccount\Models\Contact;
 use Wonder\Plugin\CustomerAccount\Models\ContactRelation;
 
@@ -12,8 +11,7 @@ use Wonder\Plugin\CustomerAccount\Models\ContactRelation;
  * I legami azienda/persona della rubrica (`contact_relations`).
  *
  * Una persona può essere referente di più aziende, un'azienda può avere più
- * referenti. Si attiva con `relations.enabled` nella configurazione del modulo:
- * spento, nessun form, lista o documento ne parla.
+ * referenti. Sempre attivi: `enabled()` resta per chi lo chiama e per i test.
  */
 final class ContactRelations
 {
@@ -24,10 +22,10 @@ final class ContactRelations
 
     public static function enabled(): bool
     {
-        return self::$override ?? (bool) CustomerAccount::config('relations.enabled', false);
+        return self::$override ?? true;
     }
 
-    /** Solo per i test: forza l'interruttore (`null` torna alla configurazione). */
+    /** Solo per i test: spegne i referenti (`null` li riaccende). */
     public static function useEnabled(?bool $enabled): void
     {
         self::$override = $enabled;

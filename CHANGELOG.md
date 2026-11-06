@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- I referenti delle aziende sono sempre attivi: l'interruttore `relations.enabled` non c'è più e `ContactRelations::enabled()` vale sempre `true`.
+
 ### Added
 
 - Primo rilascio: schede contatto e indirizzi estratti da `wonder-image/app`.
