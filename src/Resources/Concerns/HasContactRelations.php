@@ -18,8 +18,7 @@ use Wonder\Plugin\CustomerAccount\Support\ContactRelations;
  *
  * Il sync del core cancella le righe di un repeater che non arriva nel POST:
  * qui i due repeater si salvano solo se il form li ha mostrati (campo
- * `contact_relations_form`) e l'interruttore `relations.enabled` è acceso.
- * Spento, la Resource non ha campi in più e non tocca `contact_relations`.
+ * `contact_relations_form`).
  */
 trait HasContactRelations
 {

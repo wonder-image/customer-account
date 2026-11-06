@@ -80,7 +80,7 @@ check('typesOf: solo schede esistenti', function () use ($contacts) {
     return ContactRelations::typesOf([1, 2, 99, 0]) === [1 => 'business', 2 => 'private'];
 });
 
-check('interruttore spento: nessun campo in più nel form', function () {
+check('spenti dai test: nessun campo in più nel form', function () {
     ContactRelations::useEnabled(false);
     $keys = array_map(static fn ($input) => $input->get('key') ?? $input->get('name'), ContactResource::formSchema());
     ContactRelations::useEnabled(null);
@@ -88,14 +88,13 @@ check('interruttore spento: nessun campo in più nel form', function () {
     return !in_array(ContactResource::RELATION_PEOPLE, $keys, true) && !in_array(ContactResource::RELATION_MARKER, $keys, true);
 });
 
-check('interruttore acceso: i due repeater e il segnaposto', function () use ($contacts) {
+check('sempre accesi: i due repeater e il segnaposto', function () use ($contacts) {
     Query::reset(['contacts' => $contacts()]);
-    ContactRelations::useEnabled(true);
+    $default = ContactRelations::enabled();
     $relations = array_keys(ContactResource::repeaterRelations());
     $fields = ContactResource::contactRelationFields();
-    ContactRelations::useEnabled(null);
 
-    return count($fields) === 3
+    return $default && count($fields) === 3
         && in_array(ContactResource::RELATION_PEOPLE, $relations, true)
         && in_array(ContactResource::RELATION_COMPANIES, $relations, true);
 });

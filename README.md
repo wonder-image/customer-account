@@ -79,15 +79,9 @@ Serve un profilo con i campi: `Auth\CustomerAuthProfile` (il profilo del core pi
 
 Un'azienda (scheda `business`) può avere più referenti, e una persona (scheda `private`) può stare in più aziende. Il legame è la tabella `contact_relations` (`Models\ContactRelation`): `company_id`, `person_id`, `job_title`, `is_primary`, `receives_documents`, `position`, `deleted`. Ogni coppia azienda/persona compare una volta sola, anche fra le righe cancellate: chi la ricollega riprende la riga di prima.
 
-Si attiva dal sito in `custom/config/modules/customer-account.php`:
+I referenti sono sempre attivi: non c'è un interruttore. `ContactRelations::enabled()` vale sempre `true` (i test lo spengono con `useEnabled(false)`).
 
-```php
-return ['relations' => ['enabled' => true]];
-```
-
-Spento (il default), la tabella esiste lo stesso dopo `forge update`, ma resta vuota: nessun form, lista o documento ne parla.
-
-- Acceso, `ContactResource` mostra il repeater «Referenti» sulle schede business e «Aziende» sulle schede private. Una riga dei referenti sceglie una persona esistente o ne crea una con nome, cognome ed email facoltativa: la nuova scheda è privata, attiva, non cliente e senza accesso. Se la creazione non riesce (per esempio un'email non valida), la riga si scarta senza errore.
+- `ContactResource` mostra il repeater «Referenti» sulle schede business e «Aziende» sulle schede private. Una riga dei referenti sceglie una persona esistente o ne crea una con nome, cognome ed email facoltativa: la nuova scheda è privata, attiva, non cliente e senza accesso. Se la creazione non riesce (per esempio un'email non valida), la riga si scarta senza errore.
 - Al massimo un referente principale per azienda: un nuovo principale, anche dal lato della persona, toglie il titolo agli altri.
 - I repeater si salvano solo se il form li ha mostrati (campo nascosto `contact_relations_form`): un salvataggio da API o da un form senza repeater non tocca i legami.
 - `Support\ContactRelations::peopleOf($companyId)` e `companiesOf($personId)` danno le righe vive in ordine, con la scheda dell'altro lato sotto `contact`. `enabled()` dice se l'interruttore è acceso.
