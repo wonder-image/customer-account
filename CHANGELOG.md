@@ -5,6 +5,8 @@
 ### Added
 
 - Primo rilascio: schede contatto e indirizzi estratti da `wonder-image/app`.
+- Referenti delle aziende (wonder-image/gestionale#145): tabella `contact_relations` (`ContactRelation`), repeater «Referenti» e «Aziende» su `ContactResource` con il trait `HasContactRelations`, persone create al volo, `ContactRelations::peopleOf()` / `companiesOf()`. Interruttore `relations.enabled`, spento di default; la tabella si crea comunque.
+- Integrazioni: eventi `contact.created`, `contact.updated`, `contact.linked`, `contact.unlinked` (`ContactEvents`, ascoltatori in `events.listeners` o con `listen()`), `ContactRelations::sync()` come unico punto di scrittura dei legami, `ContactRecord` (`from()`, `fromArray()`, `validate()`) come forma stabile della scheda per export, import e sync, con `external_ids` da `external_references` e i consensi del core.
 - Campi della registrazione configurabili dal sito (`signup.fields`: telefono, data di nascita, fatturazione, primo indirizzo di spedizione) con `CustomerAuthProfile` / `HasSignupFields`.
 - Export CSV ed Excel dei contatti (`ContactExport`), con celle in testo.
 - API Google dichiarate al registro del core (`ModuleGoogleApis`, richiede wonder-image/app#97): Maps JavaScript e Places per l'autocompletamento degli indirizzi.

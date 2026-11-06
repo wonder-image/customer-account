@@ -14,4 +14,21 @@ return [
          */
         'fields' => [],
     ],
+
+    /*
+     * Referenti delle aziende (`contact_relations`): un'azienda con più persone, una persona
+     * in più aziende. Spento non compare nulla; la tabella esiste comunque.
+     */
+    'relations' => [
+        'enabled' => false,
+    ],
+
+    /*
+     * Ascoltatori degli eventi della rubrica (`Support\ContactEvents`): punto di aggancio per
+     * export, import e sync verso CRM o newsletter. `[evento => [callable o classe]]`, per
+     * esempio `['contact.linked' => [App\Crm\SyncContact::class]]`.
+     */
+    'events' => [
+        'listeners' => [],
+    ],
 ];

@@ -5,5 +5,6 @@
   "invalid": "Controlla il tipo di contatto e lo stato della scheda.",
   "invalid_address": "Controlla il paese e la provincia dell'indirizzo.",
   "invalid_contact": "Contatto non valido: l'indirizzo deve appartenere a una scheda esistente e non può essere trasferito.",
-  "csrf": "Sessione del form non valida. Ricarica la pagina e riprova."
+  "csrf": "Sessione del form non valida. Ricarica la pagina e riprova.",
+  "relations": "Referenti e aziende", "people": "Referenti", "companies": "Aziende", "person": "Persona", "company": "Azienda", "job_title": "Mansione", "is_primary": "Referente principale", "receives_documents": "Riceve i documenti", "new_name": "Oppure nuova persona: nome", "new_surname": "Cognome", "new_email": "Email", "yes": "Sì", "no": "No", "add_person": "Aggiungi referente", "add_company": "Aggiungi azienda"
 }

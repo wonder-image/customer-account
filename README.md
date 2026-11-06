@@ -75,6 +75,61 @@ Serve un profilo con i campi: `Auth\CustomerAuthProfile` (il profilo del core pi
 
 `ContactResource` esporta in Excel (.xlsx) e CSV dal bottone «Esporta» della tabella. Le colonne vengono da `Support\ContactExport::columns()`, condivise con le Resource del gestionale sulla stessa tabella: anagrafica, recapiti, fatturazione, stato e data di creazione. Le celle escono come testo (`downloadAsText()` del core): niente formule, zeri iniziali di CAP e telefoni intatti. L'export prende tutte le righe della `querySchema()` della Resource, non i filtri della tabella.
 
+## Referenti delle aziende
+
+Un'azienda (scheda `business`) può avere più referenti, e una persona (scheda `private`) può stare in più aziende. Il legame è la tabella `contact_relations` (`Models\ContactRelation`): `company_id`, `person_id`, `job_title`, `is_primary`, `receives_documents`, `position`, `deleted`. Ogni coppia azienda/persona compare una volta sola, anche fra le righe cancellate: chi la ricollega riprende la riga di prima.
+
+Si attiva dal sito in `custom/config/modules/customer-account.php`:
+
+```php
+return ['relations' => ['enabled' => true]];
+```
+
+Spento (il default), la tabella esiste lo stesso dopo `forge update`, ma resta vuota: nessun form, lista o documento ne parla.
+
+- Acceso, `ContactResource` mostra il repeater «Referenti» sulle schede business e «Aziende» sulle schede private. Una riga dei referenti sceglie una persona esistente o ne crea una con nome, cognome ed email facoltativa: la nuova scheda è privata, attiva, non cliente e senza accesso. Se la creazione non riesce (per esempio un'email non valida), la riga si scarta senza errore.
+- Al massimo un referente principale per azienda: un nuovo principale, anche dal lato della persona, toglie il titolo agli altri.
+- I repeater si salvano solo se il form li ha mostrati (campo nascosto `contact_relations_form`): un salvataggio da API o da un form senza repeater non tocca i legami.
+- `Support\ContactRelations::peopleOf($companyId)` e `companiesOf($personId)` danno le righe vive in ordine, con la scheda dell'altro lato sotto `contact`. `enabled()` dice se l'interruttore è acceso.
+- Una Resource sulla tabella dei contatti prende i repeater con il trait `Resources\Concerns\HasContactRelations` (`...static::contactRelationFields()` nel `formSchema()`). Il gancio `relationPersonPayload(array $values)` ritocca i valori della persona creata al volo.
+- `Support\ContactRelations::sync($parentColumn, $parentId, $rows)` è l'unico punto che scrive i legami: i repeater, un'API, un import o una sync ci passano. Le righe assenti si cancellano (soft delete).
+
+## Integrazioni (export, import, sync)
+
+Il modulo non contiene connettori per CRM o newsletter: dà i ganci per scriverli nel sito o in un modulo.
+
+**Eventi** (`Support\ContactEvents`):
+
+| Evento | Quando | Payload |
+|---|---|---|
+| `contact.created` | scheda creata dal backend o persona creata al volo da un referente | `id`, `contact` |
+| `contact.updated` | scheda salvata dal backend | `id`, `contact` |
+| `contact.linked` | nuovo legame azienda/persona (anche una riga cancellata che torna viva) | `company_id`, `person_id`, `relation` |
+| `contact.unlinked` | legame tolto | `company_id`, `person_id`, `relation` |
+
+Gli ascoltatori si registrano in codice con `ContactEvents::listen($evento, $callable)` oppure dal sito:
+
+```php
+// custom/config/modules/customer-account.php
+return [
+    'events' => [
+        'listeners' => [
+            'contact.updated' => [\App\Crm\PushContact::class], // handle($evento, $payload) o __invoke
+        ],
+    ],
+];
+```
+
+Un ascoltatore riceve `($evento, $payload)`. Se lancia un'eccezione, l'errore finisce nel log e il salvataggio prosegue. Un ascoltatore lento rallenta il salvataggio: per una chiamata esterna conviene accodare un lavoro (scheduler del core) e farlo lì.
+
+**Forma stabile della scheda** (`Support\ContactRecord`):
+
+- `from($contactOrId)` dà un array serializzabile con `schema` (oggi `1`), `id`, i campi di `ContactExport::FIELDS`, `active`, `relations` (legami vivi: id dell'altro lato, `job_title`, `is_primary`, `receives_documents`), `external_ids` (righe di `external_references` con `entity_type = contacts`: `provider`, `environment`, `object_type`, `external_id`, `synced_at`) e `consents` (stato corrente dei consensi dell'utente collegato, dal registro del core). È la base per un export o un payload verso un CRM.
+- `fromArray($input)` porta un record in ingresso agli stessi campi, ripuliti; le chiavi assenti restano assenti, così un import parziale non svuota la scheda.
+- `validate($record)` dà gli errori (campo → `required` / `invalid`) con le regole di base: tipo, ragione sociale o nome, formato di email e PEC, legami e id esterni completi.
+
+L'id di un sistema esterno si salva in `external_references` (modello `ExternalReference` del core), non in una colonna nuova della scheda. I consensi restano quelli del core: il modulo non ne aggiunge.
+
 ## Per i moduli che si appoggiano alla scheda
 
 - `Account\ContactAccount::link($userId, $input)` collega l'utente a una scheda: riusa quella già collegata o una email non assegnata, rifiuta una scheda di un altro account (`contact_link_conflict`). Nome, cognome ed email della scheda diventano quelli dell'utente; il telefono solo se arriva pieno.

@@ -4,6 +4,8 @@ namespace Wonder\Plugin\CustomerAccount\Resources;
 
 use InvalidArgumentException;
 use Wonder\Plugin\CustomerAccount\Models\Contact;
+use Wonder\Plugin\CustomerAccount\Resources\Concerns\HasContactRelations;
+use Wonder\Plugin\CustomerAccount\Support\ContactEvents;
 use Wonder\Plugin\CustomerAccount\Support\ContactExport;
 use Wonder\App\Resource;
 use Wonder\App\ResourceRegistry;
@@ -15,6 +17,8 @@ use Wonder\Http\Csrf;
 /** App-only address book, without commercial fields or account credentials. */
 class ContactResource extends Resource
 {
+    use HasContactRelations;
+
     public static string $model = Contact::class;
     public static string $orderColumn = 'id';
 
@@ -42,6 +46,7 @@ class ContactResource extends Resource
             FormField::key('email')->email(),
             FormField::key('note')->textarea(),
             FormField::key('active')->select(['true' => (string) __t('contacts.enabled'), 'false' => (string) __t('contacts.disabled')])->value('true')->required(),
+            ...static::contactRelationFields(),
         ];
     }
     public static function formLayoutSchema(): ?Form
@@ -138,6 +143,33 @@ class ContactResource extends Resource
     {
         if (!Csrf::verify($values)) {
             throw new InvalidArgumentException((string) __t('contacts.csrf'));
+        }
+    }
+
+    /** Emette `ContactEvents::CREATED`: le sottoclassi che lo ridefiniscono chiamano `parent::afterStore()`. */
+    public static function afterStore(object $result, array $values = []): void
+    {
+        parent::afterStore($result, $values);
+        static::dispatchContactEvent(ContactEvents::CREATED, (int) ($result->insert_id ?? 0), $result);
+    }
+
+    /** Emette `ContactEvents::UPDATED`. */
+    public static function afterUpdate(int|string $id, object $result, array $values = []): void
+    {
+        parent::afterUpdate($id, $result, $values);
+        static::dispatchContactEvent(ContactEvents::UPDATED, (int) $id, $result);
+    }
+
+    protected static function dispatchContactEvent(string $event, int $id, object $result): void
+    {
+        if ($id <= 0 || ($result->success ?? true) === false) {
+            return;
+        }
+
+        $contact = Contact::findById($id);
+
+        if (is_array($contact) && isset($contact['id'])) {
+            ContactEvents::dispatch($event, ['id' => $id, 'contact' => $contact]);
         }
     }
 }
