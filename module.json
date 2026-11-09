@@ -29,13 +29,19 @@
     "database": {
         "models": "src/Models",
         "migrations": [
-            "Wonder\\Plugin\\CustomerAccount\\Migrations\\LegacyContactTablesMigration"
+            "Wonder\\Plugin\\CustomerAccount\\Migrations\\LegacyContactTablesMigration",
+            "Wonder\\Plugin\\CustomerAccount\\Migrations\\CompanySplitMigration"
         ]
     },
     "views": {
         "sealed": [
             "pages/account",
             "components/account"
+        ]
+    },
+    "console": {
+        "commands": [
+            "Wonder\\Plugin\\CustomerAccount\\Console\\CompaniesCommand"
         ]
     }
 }

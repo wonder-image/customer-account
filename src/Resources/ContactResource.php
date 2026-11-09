@@ -14,7 +14,11 @@ use Wonder\Elements\Components\Card;
 use Wonder\Elements\Form\Form;
 use Wonder\Http\Csrf;
 
-/** App-only address book, without commercial fields or account credentials. */
+/**
+ * La rubrica delle persone, senza campi commerciali né credenziali.
+ * `CompanyResource` la estende per le aziende: i punti che cambiano sono
+ * `requiredKeys()`, `exportFields()`, `addressesPath()` e gli eventi.
+ */
 class ContactResource extends Resource
 {
     use HasContactRelations;
@@ -30,19 +34,18 @@ class ContactResource extends Resource
     }
     public static function labelSchema(): array
     {
-        return Contact::billing()->labels() + [
+        return static::$model::billing()->labels() + [
             'email' => (string) __t('contacts.email'), 'note' => (string) __t('contacts.note'),
             'active' => (string) __t('contacts.active'),
         ];
     }
     public static function formSchema(): array
     {
-        $fields = Contact::billing()->formSchema();
-        foreach (['business_name', 'pi', 'sdi', 'pec'] as $key) { $fields[$key]->visibleWhen('type', 'business'); }
-        $fields['business_name']->required();
-        foreach (['name', 'surname'] as $key) { $fields[$key]->required()->visibleWhen('type', 'private'); }
+        $fields = static::$model::billing()->formSchema();
+        foreach (static::requiredKeys() as $key) { $fields[$key]->required(); }
         return [
             ...array_values($fields),
+            ...static::extraFormFields(),
             FormField::key('email')->email(),
             FormField::key('note')->textarea(),
             FormField::key('active')->select(['true' => (string) __t('contacts.enabled'), 'false' => (string) __t('contacts.disabled')])->value('true')->required(),
@@ -51,7 +54,7 @@ class ContactResource extends Resource
     }
     public static function formLayoutSchema(): ?Form
     {
-        $widths = ['type' => 12, 'country' => 12, 'street' => 9, 'number' => 3, 'province' => 4, 'city' => 5, 'cap' => 3, 'phone_prefix' => 3, 'phone' => 9, 'name' => 6, 'surname' => 6,
+        $widths = ['country' => 12, 'is_customer' => 6, 'is_supplier' => 6, 'street' => 9, 'number' => 3, 'province' => 4, 'city' => 5, 'cap' => 3, 'phone_prefix' => 3, 'phone' => 9, 'name' => 6, 'surname' => 6,
             'pi' => 6, 'sdi' => 6];
         $fields = array_map(static fn ($field) => $field->columnSpan($widths[$field->name] ?? 12), static::formSchema());
         return (new Form)->columns(12)->components([(new Card)->columns(12)->columnSpan(12)->components($fields)]);
@@ -64,11 +67,23 @@ class ContactResource extends Resource
             TableColumn::key('actions')->button()->actions(['edit']),
         ];
     }
+    /** Il nome di una scheda: la ragione sociale se c'è, altrimenti nome e cognome. */
     public static function displayName(array $row): string
     {
-        $name = ($row['type'] ?? 'private') === 'business' ? (string) ($row['business_name'] ?? '') : ($row['name'] ?? '').' '.($row['surname'] ?? '');
-        return trim($name) ?: '#'.($row['id'] ?? '');
+        $name = trim((string) ($row['business_name'] ?? ''));
+        if ($name === '') { $name = trim(($row['name'] ?? '').' '.($row['surname'] ?? '')); }
+        return $name !== '' ? $name : '#'.($row['id'] ?? '');
     }
+    /** I campi obbligatori della fatturazione. */
+    public static function requiredKeys(): array { return ['name', 'surname']; }
+    /** I campi della ricerca nell'elenco. */
+    public static function searchKeys(): array { return ['name', 'surname', 'email', 'city']; }
+    /** I campi dell'export, in ordine. */
+    public static function exportFields(): array { return ContactExport::PERSON_FIELDS; }
+    /** La Resource degli indirizzi di spedizione e la colonna che la lega. */
+    public static function addressesPath(): array { return ['contact-addresses', 'contact_id']; }
+    /** Campi del form in più dopo la fatturazione. */
+    protected static function extraFormFields(): array { return []; }
     public static function mutateFormValues(array $values, string $mode, string $context = 'backend'): array
     {
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST' && trim((string) ($values['phone_prefix'] ?? '')) === '') {
@@ -82,10 +97,13 @@ class ContactResource extends Resource
     public static function pageSchema(): PageSchema
     {
         return PageSchema::for(static::class)->disable(['delete'])->redirect('store', 'edit')->redirect('update', 'edit')
-            ->actions('edit', static fn (array $row): array => [[
-                'label' => (string) __t('contacts.addresses'), 'icon' => 'bi bi-geo-alt',
-                'href' => __r('backend.resource.contact-addresses.list').'?contact_id='.(int) ($row['id'] ?? 0),
-            ]]);
+            ->actions('edit', static function (array $row): array {
+                [$path, $key] = static::addressesPath();
+                return [[
+                    'label' => (string) __t('contacts.addresses'), 'icon' => 'bi bi-geo-alt',
+                    'href' => __r('backend.resource.'.$path.'.list').'?'.$key.'='.(int) ($row['id'] ?? 0),
+                ]];
+            });
     }
     public static function apiSchema(): ApiSchema { return ApiSchema::for(static::class)->enabled(false); }
     public static function permissionSchema(): PermissionSchema
@@ -94,23 +112,23 @@ class ContactResource extends Resource
     }
     public static function navigationSchema(): NavigationSchema
     {
-        // A richer module/site contact Resource keeps the menu; the generic URLs remain available.
+        // Una Resource più ricca sulla stessa tabella (modulo o sito) tiene il menu; gli URL generici restano.
         $visible = true;
         foreach (ResourceRegistry::classes() as $resource) {
-            if ($resource !== static::class && !is_subclass_of($resource, self::class) && $resource::modelTable() === Contact::$table) {
+            if ($resource !== static::class && !is_subclass_of($resource, static::class) && $resource::modelTable() === static::$model::$table) {
                 $visible = false;
                 break;
             }
         }
-        return NavigationSchema::for(static::class)->title((string) __t('contacts.title'))->sectionOrder(400)
+        return NavigationSchema::for(static::class)->title(static::textSchema()['plural_label'])->sectionOrder(400)
             ->authority(['admin', 'administrator'])->enabled($visible);
     }
     public static function tableLayoutSchema(): TableLayoutSchema
     {
-        return TableLayoutSchema::for(static::class)->searchFields(['name', 'surname', 'business_name', 'email', 'city'])
+        return TableLayoutSchema::for(static::class)->searchFields(static::searchKeys())
             ->download(ContactExport::FORMATS)->downloadAsText()
-            ->downloadColumns(ContactExport::columns(static::labelSchema(), [static::class, 'displayName']))
-            ->downloadFileName(create_link((string) __t('contacts.title')).'-'.date('Y-m-d'));
+            ->downloadColumns(ContactExport::columns(static::labelSchema(), [static::class, 'displayName'], [], static::exportFields()))
+            ->downloadFileName(create_link(static::textSchema()['plural_label']).'-'.date('Y-m-d'));
     }
     public static function mutateRequestValues(array $values, string $action, string $context = 'backend', ?array $oldValues = null): array
     {
@@ -119,12 +137,12 @@ class ContactResource extends Resource
         foreach ($values as $key => $value) {
             if (!is_scalar($value) && $value !== null) { throw new InvalidArgumentException((string) __t('account.validation.invalid', ['field' => static::labelSchema()[$key]])); }
         }
-        if (!in_array($values['type'] ?? '', ['private', 'business'], true)
-            || !in_array($values['active'] ?? '', ['true', 'false'], true)) {
-            throw new InvalidArgumentException((string) __t('contacts.invalid'));
+        foreach (['active', 'is_customer', 'is_supplier'] as $flag) {
+            if (array_key_exists($flag, $values) && !in_array($values[$flag], ['true', 'false'], true)) {
+                throw new InvalidArgumentException((string) __t('contacts.invalid'));
+            }
         }
-        $required = $values['type'] === 'business' ? ['business_name'] : ['name', 'surname'];
-        foreach ($required as $key) {
+        foreach (static::requiredKeys() as $key) {
             if (trim((string) ($values[$key] ?? '')) === '') {
                 throw new InvalidArgumentException((string) __t('account.validation.required', ['field' => static::labelSchema()[$key]]));
             }
@@ -135,7 +153,7 @@ class ContactResource extends Resource
             || ($province !== '' && !array_key_exists($province, states($country)))) {
             throw new InvalidArgumentException((string) __t('contacts.invalid_address'));
         }
-        if ($action === 'store') { $values['code'] = Contact::newCode(); }
+        if ($action === 'store') { $values['code'] = static::$model::newCode(); }
         return $values;
     }
     /** Difesa locale: il controller del core ha già verificato `_csrf`, che arriva qui con il POST. */
@@ -146,30 +164,37 @@ class ContactResource extends Resource
         }
     }
 
-    /** Emette `ContactEvents::CREATED`: le sottoclassi che lo ridefiniscono chiamano `parent::afterStore()`. */
+    /** Emette l'evento di creazione: le sottoclassi che lo ridefiniscono chiamano `parent::afterStore()`. */
     public static function afterStore(object $result, array $values = []): void
     {
         parent::afterStore($result, $values);
-        static::dispatchContactEvent(ContactEvents::CREATED, (int) ($result->insert_id ?? 0), $result);
+        static::dispatchContactEvent('created', (int) ($result->insert_id ?? 0), $result);
     }
 
-    /** Emette `ContactEvents::UPDATED`. */
+    /** Emette l'evento di modifica. */
     public static function afterUpdate(int|string $id, object $result, array $values = []): void
     {
         parent::afterUpdate($id, $result, $values);
-        static::dispatchContactEvent(ContactEvents::UPDATED, (int) $id, $result);
+        static::dispatchContactEvent('updated', (int) $id, $result);
     }
 
-    protected static function dispatchContactEvent(string $event, int $id, object $result): void
+    /** Il nome dell'evento (`created`, `updated`) e la chiave della scheda nel payload. */
+    protected static function contactEvent(string $what): array
+    {
+        return [$what === 'created' ? ContactEvents::CREATED : ContactEvents::UPDATED, 'contact'];
+    }
+
+    protected static function dispatchContactEvent(string $what, int $id, object $result): void
     {
         if ($id <= 0 || ($result->success ?? true) === false) {
             return;
         }
 
-        $contact = Contact::findById($id);
+        $row = static::$model::findById($id);
 
-        if (is_array($contact) && isset($contact['id'])) {
-            ContactEvents::dispatch($event, ['id' => $id, 'contact' => $contact]);
+        if (is_array($row) && isset($row['id'])) {
+            [$event, $key] = static::contactEvent($what);
+            ContactEvents::dispatch($event, ['id' => $id, $key => $row]);
         }
     }
 }

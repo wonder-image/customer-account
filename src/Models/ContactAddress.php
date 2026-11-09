@@ -2,9 +2,8 @@
 
 namespace Wonder\Plugin\CustomerAccount\Models;
 
-use Throwable;
 use Wonder\App\Model;
-use Wonder\App\Schema\Extensions\AddressExtension;
+use Wonder\Plugin\CustomerAccount\Models\Concerns\HasDeliveryAddress;
 use Wonder\App\Support\SyncSchema;
 use Wonder\Data\UploadSchema as Field;
 use Wonder\Sql\TableSchema as Column;
@@ -26,16 +25,7 @@ class ContactAddress extends Model
     public static string $folder = 'contacts';
     public static string $icon = 'bi bi-geo';
 
-    /** L'indirizzo semplice del core, con destinatario e telefono. */
-    /** `$prefix` per un indirizzo dentro un altro form (`shipping` nella registrazione): i campi diventano `shipping_*`. */
-    public static function address(?string $prefix = null): AddressExtension
-    {
-        return AddressExtension::simple($prefix, countryDefault: 'IT')
-            ->withLink(false)
-            ->withContactName()
-            ->withPhone()
-            ->withGeo();
-    }
+    use HasDeliveryAddress;
 
     public static function syncSchema(): ?SyncSchema
     {
@@ -69,17 +59,5 @@ class ContactAddress extends Model
             Field::key('is_default')->text()->sanitize(false),
             Field::key('position')->number()->decimals(0),
         ];
-    }
-
-    public static function decorate(array $row): array
-    {
-        try {
-            return static::address()->decorate($row);
-        } catch (Throwable) {
-            // L'indirizzo "bello" lo compone il core con le sue funzioni
-            // globali, che nei comandi di `forge` non esistono: lì la riga
-            // torna com'è invece di far esplodere chi la legge.
-            return $row;
-        }
     }
 }

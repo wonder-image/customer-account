@@ -15,7 +15,7 @@ final class SignupFields
      * Campi dell'indirizzo che dicono che la sezione facoltativa è stata compilata: paese, tipo, prefisso,
      * coordinate e nome (precompilato dall'utente) hanno un valore anche se il cliente non scrive niente.
      */
-    public const FILLED_KEYS = ['street', 'number', 'city', 'cap', 'more', 'business_name', 'cf', 'pi', 'sdi', 'pec', 'phone'];
+    public const FILLED_KEYS = ['street', 'number', 'city', 'cap', 'more', 'cf', 'phone'];
 
     /** @return array<string, string> sezione => stato, per tutte le SECTIONS */
     public static function resolve(array $site, array $defaults = []): array

@@ -27,14 +27,12 @@ final class AccountBilling
             : (object) ['success' => false, 'messages' => [(string) __t('account.errors.save')]];
     }
 
-    /** Una sola riga: intestatario, codice fiscale e partita IVA, indirizzo. */
+    /** Una sola riga: intestatario, codice fiscale, indirizzo. I dati da società stanno sulle aziende. */
     public static function rows(array $contact): array
     {
         $text = static fn (string $key): string => trim((string) ($contact[$key] ?? ''));
-        $business = $text('business_name');
-        $person = trim($text('name').' '.$text('surname'));
-        $holder = ($contact['type'] ?? '') === 'business' ? ($business ?: $person) : ($person ?: $business);
-        $tax = implode(' / ', array_filter([$text('cf'), $text('pi')]));
+        $holder = trim($text('name').' '.$text('surname'));
+        $tax = $text('cf');
         $address = implode(', ', array_filter([
             trim($text('street').' '.$text('number')),
             trim($text('cap').' '.$text('city').' '.$text('province')),

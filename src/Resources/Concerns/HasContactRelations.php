@@ -8,16 +8,18 @@ use Wonder\App\ResourceSchema\Input;
 use Wonder\App\ResourceSchema\RepeaterColumn;
 use Wonder\App\ResourceSchema\RepeaterRelation;
 use Wonder\App\Support\Repeater;
-use Wonder\Plugin\CustomerAccount\Models\Contact;
 use Wonder\Plugin\CustomerAccount\Models\ContactRelation;
 use Wonder\Plugin\CustomerAccount\Support\ContactRelations;
 
 /**
- * I repeater «Referenti» (schede business) e «Aziende» (schede private) di una
- * Resource della rubrica.
+ * Il repeater dei legami azienda/persona di una Resource della rubrica:
+ * «Referenti» sulle aziende, «Aziende» sulle persone.
+ *
+ * Il lato lo dice `relationSide()`: `ContactRelations::PERSON` (default) per
+ * le persone, `ContactRelations::COMPANY` per le aziende.
  *
  * Il sync del core cancella le righe di un repeater che non arriva nel POST:
- * qui i due repeater si salvano solo se il form li ha mostrati (campo
+ * qui il repeater si salva solo se il form l'ha mostrato (campo
  * `contact_relations_form`).
  */
 trait HasContactRelations
@@ -25,6 +27,18 @@ trait HasContactRelations
     public const RELATION_PEOPLE = 'contact_people';
     public const RELATION_COMPANIES = 'contact_companies';
     public const RELATION_MARKER = 'contact_relations_form';
+
+    /** Il lato della scheda nel legame. */
+    public static function relationSide(): string
+    {
+        return ContactRelations::PERSON;
+    }
+
+    /** Il nome del repeater della scheda. */
+    public static function relationInputName(): string
+    {
+        return static::relationSide() === ContactRelations::COMPANY ? self::RELATION_PEOPLE : self::RELATION_COMPANIES;
+    }
 
     /** @return list<Input> */
     public static function contactRelationFields(): array
@@ -34,8 +48,7 @@ trait HasContactRelations
         }
 
         return [
-            static::contactPeopleField(),
-            static::contactCompaniesField(),
+            static::relationSide() === ContactRelations::COMPANY ? static::contactPeopleField() : static::contactCompaniesField(),
             FormField::key(self::RELATION_MARKER)->hidden()->value('1'),
         ];
     }
@@ -45,7 +58,7 @@ trait HasContactRelations
         return static::relationRepeater(self::RELATION_PEOPLE, ContactRelations::COMPANY, [
             RepeaterColumn::key('id')->hidden(),
             RepeaterColumn::key(ContactRelations::PERSON)
-                ->selectSearch(['' => '—'] + static::relationOptions('private'))
+                ->selectSearch(['' => '—'] + static::relationOptions(ContactRelations::COMPANY))
                 ->label(static::relationText('person'))
                 ->columnSpan(6),
             RepeaterColumn::key('job_title')->text()->label(static::relationText('job_title'))->columnSpan(6),
@@ -53,7 +66,7 @@ trait HasContactRelations
             RepeaterColumn::key('new_surname')->text()->label(static::relationText('new_surname'))->columnSpan(4),
             RepeaterColumn::key('new_email')->email()->label(static::relationText('new_email'))->columnSpan(4),
             ...static::relationFlagColumns(),
-        ], 'business', static::relationText('add_person'));
+        ], static::relationText('add_person'));
     }
 
     protected static function contactCompaniesField(): Input
@@ -61,29 +74,36 @@ trait HasContactRelations
         return static::relationRepeater(self::RELATION_COMPANIES, ContactRelations::PERSON, [
             RepeaterColumn::key('id')->hidden(),
             RepeaterColumn::key(ContactRelations::COMPANY)
-                ->selectSearch(['' => '—'] + static::relationOptions('business'))
+                ->selectSearch(['' => '—'] + static::relationOptions(ContactRelations::PERSON))
                 ->label(static::relationText('company'))
                 ->columnSpan(6),
             RepeaterColumn::key('job_title')->text()->label(static::relationText('job_title'))->columnSpan(6),
             ...static::relationFlagColumns(),
-        ], 'private', static::relationText('add_company'));
+        ], static::relationText('add_company'));
     }
 
     /** @return list<Input> */
     protected static function relationFlagColumns(): array
     {
         $options = ['false' => static::relationText('no'), 'true' => static::relationText('yes')];
+        $access = [];
+
+        foreach (ContactRelation::ACCESS as $value) {
+            $access[$value] = static::relationText('access_'.$value);
+        }
 
         return [
             RepeaterColumn::key('is_primary')->select($options)->value('false')
-                ->label(static::relationText('is_primary'))->columnSpan(6),
+                ->label(static::relationText('is_primary'))->columnSpan(4),
             RepeaterColumn::key('receives_documents')->select($options)->value('false')
-                ->label(static::relationText('receives_documents'))->columnSpan(6),
+                ->label(static::relationText('receives_documents'))->columnSpan(4),
+            RepeaterColumn::key('access')->select($access)->value(ContactRelation::ACCESS_NONE)
+                ->label(static::relationText('access'))->columnSpan(4),
         ];
     }
 
     /** @param list<Input> $columns */
-    protected static function relationRepeater(string $key, string $parentColumn, array $columns, string $type, string $addLabel): Input
+    protected static function relationRepeater(string $key, string $parentColumn, array $columns, string $addLabel): Input
     {
         return FormField::key($key)
             ->repeater($columns)
@@ -96,19 +116,20 @@ trait HasContactRelations
             ->nested()
             ->repeaterSortable()
             ->repeaterAddLabel($addLabel)
-            ->visibleWhen('type', $type)
             ->label('');
     }
 
     /**
-     * Le schede di un tipo per il select di una riga.
+     * Le schede dell'altro lato per il select di una riga.
      *
      * @return array<int, string>
      */
-    protected static function relationOptions(string $type): array
+    protected static function relationOptions(string $parentColumn): array
     {
+        $model = ContactRelations::counterpartModel($parentColumn);
+
         try {
-            $rows = Contact::find(['type' => $type]);
+            $rows = $model::find(['deleted' => 'false']);
         } catch (Throwable) {
             return [];
         }
@@ -130,12 +151,15 @@ trait HasContactRelations
         return $options;
     }
 
-    /** Come si legge una scheda nel select: nome, ed email se c'è. */
+    /** Come si legge una scheda nel select: nome o ragione sociale, ed email se c'è. */
     protected static function relationLabel(array $row): string
     {
-        $name = ($row['type'] ?? '') === 'business'
-            ? trim((string) ($row['business_name'] ?? ''))
-            : trim(((string) ($row['name'] ?? '')).' '.((string) ($row['surname'] ?? '')));
+        $name = trim((string) ($row['business_name'] ?? ''));
+
+        if ($name === '') {
+            $name = trim(((string) ($row['name'] ?? '')).' '.((string) ($row['surname'] ?? '')));
+        }
+
         $name = html_entity_decode($name !== '' ? $name : '#'.($row['id'] ?? ''), ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $email = trim((string) ($row['email'] ?? ''));
 
@@ -148,7 +172,7 @@ trait HasContactRelations
     }
 
     /**
-     * I valori della scheda creata al volo da una riga dei referenti: chi usa
+     * I valori della persona creata al volo da una riga dei referenti: chi usa
      * il trait li ritocca (ruoli, codice, …).
      *
      * @param array<string, mixed> $values
@@ -176,7 +200,7 @@ trait HasContactRelations
         $ours = [self::RELATION_PEOPLE, self::RELATION_COMPANIES];
         $summary = [];
 
-        // Il ciclo del core, senza i nostri due repeater.
+        // Il ciclo del core, senza i nostri repeater.
         foreach (static::repeaterRelations() as $inputName => $entry) {
             if (in_array($inputName, $ours, true)) {
                 continue;
@@ -194,27 +218,17 @@ trait HasContactRelations
             );
         }
 
-        if (ContactRelations::enabled() && isset($post[self::RELATION_MARKER])) {
-            $relations = static::repeaterRelations();
-            $contact = Contact::findById((int) $parentId);
-            $isCompany = is_array($contact) && ($contact['type'] ?? '') === 'business';
-            $inputName = $isCompany ? self::RELATION_PEOPLE : self::RELATION_COMPANIES;
+        $inputName = static::relationInputName();
 
-            if (isset($relations[$inputName])) {
-                $summary[$inputName] = static::syncContactRelations($relations[$inputName]['relation'], $inputName, (int) $parentId, $post, $files);
-            }
+        if (ContactRelations::enabled() && isset($post[self::RELATION_MARKER])) {
+            $summary[$inputName] = ContactRelations::sync(
+                static::relationSide(),
+                (int) $parentId,
+                Repeater::rowsFromRequest($inputName, $post, $files),
+                static fn (array $values): array => static::relationPersonPayload($values)
+            );
         }
 
         return $summary;
-    }
-
-    protected static function syncContactRelations(RepeaterRelation $relation, string $inputName, int $parentId, array $post, array $files): array
-    {
-        return ContactRelations::sync(
-            $relation->parentKey,
-            $parentId,
-            Repeater::rowsFromRequest($inputName, $post, $files),
-            static fn (array $values): array => static::relationPersonPayload($values)
-        );
     }
 }

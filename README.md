@@ -2,7 +2,7 @@
 
 Modulo Composer per [wonder-image/app](https://github.com/wonder-image/app): l'account cliente persistente.
 
-Contiene le schede contatto (`contacts`, `contact_addresses`), il collegamento fra utente e scheda, i dati di fatturazione, gli indirizzi di spedizione multipli nell'area account, il pannello backend generico dei contatti e la migrazione delle vecchie tabelle `gst_*`.
+Contiene le persone (`contacts`, `contact_addresses`), le aziende (`companies`, `company_addresses`), i legami fra le due (`contact_relations`), il collegamento fra utente e scheda, i dati di fatturazione, gli indirizzi di spedizione multipli nell'area account, il pannello backend generico dei contatti e la migrazione delle vecchie tabelle `gst_*`.
 
 È la base comune di `wonder-image/gestionale` e `wonder-image/ecommerce`. Un sito con il solo `wonder-image/app` non ha tabelle, Resource né menu dei contatti.
 
@@ -20,9 +20,12 @@ Ordine consigliato in `modules.php`: `customer-account`, poi `gestionale`, poi `
 
 | Parte | Dove | Note |
 |---|---|---|
-| Modelli `Contact`, `ContactAddress` | `src/Models` | Tabelle `contacts` e `contact_addresses`, escluse dalla sync dei dati operativi. |
+| Modelli `Contact`, `ContactAddress` | `src/Models` | Persone: tabelle `contacts` e `contact_addresses`, escluse dalla sync dei dati operativi. |
+| Modelli `Company`, `CompanyAddress` | `src/Models` | Aziende: tabelle `companies` e `company_addresses`, con fatturazione aziendale (`asBusiness()`), `is_customer` e `is_supplier`. |
+| Migrazione `CompanySplitMigration` | `database.migrations` | Separa le aziende dai contatti, una volta sola: vedi «Aziende separate dai contatti». |
+| Comando `customer-account:companies` | `console` | `php forge customer-account:companies` mostra cosa farà la migrazione, senza scrivere. |
 | Migrazione `LegacyContactTablesMigration` | `database.migrations` | `forge update` la esegue dopo la rinomina del core (`gst_external_references` → `external_references`) e prima dell'allineamento delle tabelle (`runTables()`): rinomina `gst_contacts` e `gst_contact_addresses` con un solo `RENAME TABLE` (ID, righe e FK intatti). Se esistono sia il nome vecchio sia il nuovo si ferma con un errore: la rinomina del core resta fatta, le tabelle non si allineano, niente si cancella né si unisce. Riconciliate le tabelle, il `forge update` seguente riprende da lì. Idempotente. |
-| Resource `ContactResource`, `ContactAddressResource` | `src/Resources` | `/backend/contacts/` e `/backend/contact-addresses/`, solo `admin`/`administrator`, CSRF, niente API né eliminazione. Sono fallback di tabella (`isTableFallback()`): per la tabella vince la prima Resource non fallback nell'ordine di scoperta del registro (`ResourceRegistry::resolveByTable()`), e il menu non mostra «Contatti» se un'altra Resource, che non ne è sottoclasse, usa `contacts`. Il «Clienti» del gestionale è uno di questi casi. |
+| Resource `ContactResource`, `ContactAddressResource`, `CompanyResource`, `CompanyAddressResource` | `src/Resources` | `/backend/contacts/`, `/backend/contact-addresses/`, `/backend/companies/` e `/backend/company-addresses/`, solo `admin`/`administrator`, CSRF, niente API né eliminazione. Sono fallback di tabella (`isTableFallback()`): per la tabella vince la prima Resource non fallback nell'ordine di scoperta del registro (`ResourceRegistry::resolveByTable()`), e il menu non mostra «Contatti» se un'altra Resource, che non ne è sottoclasse, usa `contacts`. Il «Clienti» del gestionale è uno di questi casi. |
 | `CustomerAccountExtension` | `config/routes/route.frontend.php` | Si registra con `AccountRoutes::extend()` nel pannello account del core. |
 | Viste sigillate | `view/pages/account`, `view/components/account` | Non si sostituiscono da `custom/`. |
 
@@ -73,20 +76,52 @@ Serve un profilo con i campi: `Auth\CustomerAuthProfile` (il profilo del core pi
 
 ## Export dei contatti
 
-`ContactResource` esporta in Excel (.xlsx) e CSV dal bottone «Esporta» della tabella. Le colonne vengono da `Support\ContactExport::columns()`, condivise con le Resource del gestionale sulla stessa tabella: anagrafica, recapiti, fatturazione, stato e data di creazione. Le celle escono come testo (`downloadAsText()` del core): niente formule, zeri iniziali di CAP e telefoni intatti. L'export prende tutte le righe della `querySchema()` della Resource, non i filtri della tabella.
+`ContactResource` e `CompanyResource` esportano in Excel (.xlsx) e CSV dal bottone «Esporta» della tabella. Le colonne vengono da `Support\ContactExport::columns()` (`PERSON_FIELDS` per le persone, `COMPANY_FIELDS` per le aziende), condivise con le Resource del gestionale sulla stessa tabella: anagrafica, recapiti, fatturazione, stato e data di creazione. Le celle escono come testo (`downloadAsText()` del core): niente formule, zeri iniziali di CAP e telefoni intatti. L'export prende tutte le righe della `querySchema()` della Resource, non i filtri della tabella.
+
+## Persone e aziende
+
+Una persona (`contacts`) e un'azienda (`companies`) sono schede distinte. Non c'è più il tipo `private`/`business`: la persona ha nome, cognome e codice fiscale; l'azienda ha ragione sociale, P.IVA, SDI e PEC. Tutte e due hanno la loro fatturazione e i loro indirizzi di spedizione.
+
+- Un'azienda può stare da sola, come cliente (`is_customer`), fornitore (`is_supplier`) o tutti e due. I fornitori sono sempre aziende.
+- Una persona può avere un account (`user_id`); un'azienda no: ci accede tramite le persone legate.
+- `CompanyResource` estende `ContactResource`: cambiano campi obbligatori (`business_name`), ricerca, export, indirizzi ed eventi.
 
 ## Referenti delle aziende
 
-Un'azienda (scheda `business`) può avere più referenti, e una persona (scheda `private`) può stare in più aziende. Il legame è la tabella `contact_relations` (`Models\ContactRelation`): `company_id`, `person_id`, `job_title`, `is_primary`, `receives_documents`, `position`, `deleted`. Ogni coppia azienda/persona compare una volta sola, anche fra le righe cancellate: chi la ricollega riprende la riga di prima.
+Un'azienda può avere più referenti, e una persona può stare in più aziende. Il legame è la tabella `contact_relations` (`Models\ContactRelation`): `company_id` (→ `companies`), `person_id` (→ `contacts`), `job_title`, `is_primary`, `receives_documents`, `access`, `position`, `deleted`. Ogni coppia azienda/persona compare una volta sola, anche fra le righe cancellate: chi la ricollega riprende la riga di prima.
+
+`access` dice cosa può fare la persona per l'azienda, per esempio dall'account sul negozio:
+
+| Valore | Significato |
+|---|---|
+| `none` | solo referente, nessun accesso (default) |
+| `buyer` | può comprare a nome dell'azienda |
+| `admin` | compra e gestisce i dati dell'azienda |
 
 I referenti sono sempre attivi: non c'è un interruttore. `ContactRelations::enabled()` vale sempre `true` (i test lo spengono con `useEnabled(false)`).
 
-- `ContactResource` mostra il repeater «Referenti» sulle schede business e «Aziende» sulle schede private. Una riga dei referenti sceglie una persona esistente o ne crea una con nome, cognome ed email facoltativa: la nuova scheda è privata, attiva, non cliente e senza accesso. Se la creazione non riesce (per esempio un'email non valida), la riga si scarta senza errore.
+- Ogni scheda ha un solo repeater: «Referenti» su `CompanyResource` (input `contact_people`), «Aziende» su `ContactResource` (input `contact_companies`). Il lato lo dice `relationSide()` del trait. Una riga dei referenti sceglie una persona esistente o ne crea una con nome, cognome ed email facoltativa: la nuova persona è attiva, non cliente e senza account. Se la creazione non riesce (per esempio un'email non valida), la riga si scarta senza errore.
 - Al massimo un referente principale per azienda: un nuovo principale, anche dal lato della persona, toglie il titolo agli altri.
-- I repeater si salvano solo se il form li ha mostrati (campo nascosto `contact_relations_form`): un salvataggio da API o da un form senza repeater non tocca i legami.
-- `Support\ContactRelations::peopleOf($companyId)` e `companiesOf($personId)` danno le righe vive in ordine, con la scheda dell'altro lato sotto `contact`. `enabled()` dice se l'interruttore è acceso.
-- Una Resource sulla tabella dei contatti prende i repeater con il trait `Resources\Concerns\HasContactRelations` (`...static::contactRelationFields()` nel `formSchema()`). Il gancio `relationPersonPayload(array $values)` ritocca i valori della persona creata al volo.
+- I repeater si salvano solo se il form li ha mostrati (campo nascosto `contact_relations_form`): un salvataggio da API o da un form senza repeater non tocca i legami. Una riga senza `access` tiene quello che aveva.
+- `Support\ContactRelations::peopleOf($companyId)` dà le righe vive con la persona sotto `contact`; `companiesOf($personId, $access = null)` con l'azienda sotto `company`, filtrabili per accesso (`['buyer', 'admin']`). `accessOf($personId, $companyId)` dà l'accesso, `none` se non sono legate.
+- Una Resource sulla tabella delle persone o delle aziende prende il repeater con il trait `Resources\Concerns\HasContactRelations` (`...static::contactRelationFields()` nel `formSchema()`). Il gancio `relationPersonPayload(array $values)` ritocca i valori della persona creata al volo.
 - `Support\ContactRelations::sync($parentColumn, $parentId, $rows)` è l'unico punto che scrive i legami: i repeater, un'API, un import o una sync ci passano. Le righe assenti si cancellano (soft delete).
+
+## Aziende separate dai contatti
+
+Fino alla 0.1 un'azienda era una scheda di `contacts` con `type = business`. `Migrations\CompanySplitMigration` le sposta in `companies` al primo `forge update`, prima che l'allineamento delle tabelle tolga da `contacts` le colonne `type`, `business_name`, `pi`, `sdi`, `pec` e `is_supplier`:
+
+| Scheda | Cosa succede |
+|---|---|
+| azienda senza account | diventa un'azienda con i suoi indirizzi e legami; la scheda contatto va nel cestino (`deleted = true`) |
+| azienda con account | la persona resta e si lega alla nuova azienda con accesso `admin` |
+| privato fornitore | nasce un'azienda fornitore «Nome Cognome», legata alla persona |
+| azienda senza ragione sociale | resta un contatto: va sistemata a mano |
+
+- Gli id esterni (`external_references`) passano da `entity_type = contacts` a `contact`, e a `company` per le schede spostate.
+- Ogni scheda trattata finisce in `contact_company_map` (`contact_id`, `company_id`, `action`): i moduli che puntano ai contatti (documenti, fornitori del gestionale) la leggono per spostare i loro riferimenti. È l'unica eccezione alla regola «niente spostamenti di dati» delle migrazioni del modulo.
+- È idempotente: senza la colonna `type` non fa niente, e una scheda già nella mappa non si ritratta.
+- Prima di aggiornare: `php forge customer-account:companies` elenca le schede di ogni caso, senza scrivere.
 
 ## Integrazioni (export, import, sync)
 
@@ -100,8 +135,10 @@ Il modulo non contiene connettori per CRM o newsletter: dà i ganci per scriverl
 | `contact.updated` | scheda salvata dal backend | `id`, `contact` |
 | `contact.linked` | nuovo legame azienda/persona (anche una riga cancellata che torna viva) | `company_id`, `person_id`, `relation` |
 | `contact.unlinked` | legame tolto | `company_id`, `person_id`, `relation` |
+| `company.created` | azienda creata dal backend | `id`, `company` |
+| `company.updated` | azienda salvata dal backend | `id`, `company` |
 
-Gli ascoltatori si registrano in codice con `ContactEvents::listen($evento, $callable)` oppure dal sito:
+Gli eventi delle aziende sono in `Support\CompanyEvents`, sullo stesso registro. Gli ascoltatori si registrano in codice con `ContactEvents::listen($evento, $callable)` oppure dal sito:
 
 ```php
 // custom/config/modules/customer-account.php
@@ -116,11 +153,11 @@ return [
 
 Un ascoltatore riceve `($evento, $payload)`. Se lancia un'eccezione, l'errore finisce nel log e il salvataggio prosegue. Un ascoltatore lento rallenta il salvataggio: per una chiamata esterna conviene accodare un lavoro (scheduler del core) e farlo lì.
 
-**Forma stabile della scheda** (`Support\ContactRecord`):
+**Forma stabile della scheda** (`Support\ContactRecord` per le persone, `Support\CompanyRecord` per le aziende, base comune `Support\PartyRecord`):
 
-- `from($contactOrId)` dà un array serializzabile con `schema` (oggi `1`), `id`, i campi di `ContactExport::FIELDS`, `active`, `relations` (legami vivi: id dell'altro lato, `job_title`, `is_primary`, `receives_documents`), `external_ids` (righe di `external_references` con `entity_type = contacts`: `provider`, `environment`, `object_type`, `external_id`, `synced_at`) e `consents` (stato corrente dei consensi dell'utente collegato, dal registro del core). È la base per un export o un payload verso un CRM.
+- `from($rowOrId)` dà un array serializzabile con `schema` (oggi `2`), `entity` (`contact` o `company`), `id`, `code`, i campi (`ContactExport::PERSON_FIELDS` più `birth_date` per la persona, `ContactExport::COMPANY_FIELDS` per l'azienda), `is_customer`, `active`, `relations` (legami vivi: id dell'altro lato, `job_title`, `is_primary`, `receives_documents`, `access`) ed `external_ids` (righe di `external_references` con `entity_type` uguale a `entity`: `provider`, `environment`, `object_type`, `external_id`, `synced_at`). La persona aggiunge `user_id` e `consents` (stato corrente dei consensi dell'utente collegato, dal registro del core); l'azienda `is_supplier`. È la base per un export o un payload verso un CRM.
 - `fromArray($input)` porta un record in ingresso agli stessi campi, ripuliti; le chiavi assenti restano assenti, così un import parziale non svuota la scheda.
-- `validate($record)` dà gli errori (campo → `required` / `invalid`) con le regole di base: tipo, ragione sociale o nome, formato di email e PEC, legami e id esterni completi.
+- `validate($record)` dà gli errori (campo → `required` / `invalid`) con le regole di base: nome o cognome per la persona, ragione sociale per l'azienda, formato di email e PEC, legami e id esterni completi.
 
 L'id di un sistema esterno si salva in `external_references` (modello `ExternalReference` del core), non in una colonna nuova della scheda. I consensi restano quelli del core: il modulo non ne aggiunge.
 
@@ -146,4 +183,4 @@ Il modulo non carica alias dei vecchi namespace del core (`Wonder\App\Models\Con
 WI_APP=/percorso/di/wonder-image/app php tests/run.php
 ```
 
-Da un sito con il modulo: `php forge update --local`, poi area account (indirizzi, fatturazione, dati personali), registrazione con `signup.fields` ed export di `/backend/contacts/`.
+Da un sito con il modulo: `php forge update --local`, poi area account (indirizzi, fatturazione, dati personali), registrazione con `signup.fields` ed export di `/backend/contacts/` e `/backend/companies/`. Prima del primo aggiornamento dopo la 0.1: `php forge customer-account:companies`.
