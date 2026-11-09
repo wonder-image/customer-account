@@ -57,11 +57,15 @@ trait HasContactRelations
     {
         return static::relationRepeater(self::RELATION_PEOPLE, ContactRelations::COMPANY, [
             RepeaterColumn::key('id')->hidden(),
-            RepeaterColumn::key(ContactRelations::PERSON)
-                ->selectSearch(['' => '—'] + static::relationOptions(ContactRelations::COMPANY))
-                ->label(static::relationText('person'))
-                ->columnSpan(6),
-            RepeaterColumn::key('job_title')->text()->label(static::relationText('job_title'))->columnSpan(6),
+            static::withRelationQuickCreate(
+                RepeaterColumn::key(ContactRelations::PERSON)
+                    ->selectSearch(['' => '—'] + static::relationOptions(ContactRelations::COMPANY))
+                    ->label(static::relationText('person'))
+                    ->columnSpan(6),
+                ContactRelations::COMPANY
+            ),
+            RepeaterColumn::key('job_title')->text()->label(static::relationText('job_title'))->columnSpan(3),
+            static::departmentColumn(),
             ...static::relationFlagColumns(),
         ], static::relationText('add_person'));
     }
@@ -70,13 +74,51 @@ trait HasContactRelations
     {
         return static::relationRepeater(self::RELATION_COMPANIES, ContactRelations::PERSON, [
             RepeaterColumn::key('id')->hidden(),
-            RepeaterColumn::key(ContactRelations::COMPANY)
-                ->selectSearch(['' => '—'] + static::relationOptions(ContactRelations::PERSON))
-                ->label(static::relationText('company'))
-                ->columnSpan(6),
-            RepeaterColumn::key('job_title')->text()->label(static::relationText('job_title'))->columnSpan(6),
+            static::withRelationQuickCreate(
+                RepeaterColumn::key(ContactRelations::COMPANY)
+                    ->selectSearch(['' => '—'] + static::relationOptions(ContactRelations::PERSON))
+                    ->label(static::relationText('company'))
+                    ->columnSpan(6),
+                ContactRelations::PERSON
+            ),
+            RepeaterColumn::key('job_title')->text()->label(static::relationText('job_title'))->columnSpan(3),
+            static::departmentColumn(),
             ...static::relationFlagColumns(),
         ], static::relationText('add_company'));
+    }
+
+    /** Il reparto del referente: a chi mandare fatture, newsletter e avvisi. */
+    protected static function departmentColumn(): Input
+    {
+        return RepeaterColumn::key('department')
+            ->select(['' => static::relationText('department_none')] + ContactRelations::departments())
+            ->value('')
+            ->label(static::relationText('department'))
+            ->columnSpan(3);
+    }
+
+    /**
+     * Il «+» del select di una riga, per creare al volo l'altro lato.
+     * Restituisce `[Resource, campi, campo etichetta, testo del bottone]`
+     * o null (nessun «+», il default): lo sovrascrive chi ha una Resource
+     * che sa creare persone o aziende (`QuickCreateStore`).
+     *
+     * @return array{0: class-string, 1?: list<string>|null, 2?: string|null, 3?: string|null}|null
+     */
+    protected static function relationQuickCreate(string $parentColumn): ?array
+    {
+        return null;
+    }
+
+    private static function withRelationQuickCreate(Input $column, string $parentColumn): Input
+    {
+        $quick = static::relationQuickCreate($parentColumn);
+
+        if ($quick === null || !method_exists($column, 'quickCreate')) {
+            return $column;
+        }
+
+        return $column->quickCreate($quick[0], $quick[1] ?? null, null, $quick[2] ?? null, $quick[3] ?? null);
     }
 
     /** @return list<Input> */

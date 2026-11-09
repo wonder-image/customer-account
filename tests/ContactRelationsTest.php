@@ -37,16 +37,16 @@ $tables = static fn (): array => [
 
 check('normalize: scarta vuoti, doppioni e controparti inesistenti; un solo principale', function () {
     $rows = ContactRelations::normalize([
-        ['person_id' => '2', 'job_title' => ' Acquisti ', 'is_primary' => 'true', 'receives_documents' => 'on', 'access' => 'buyer'],
+        ['person_id' => '2', 'job_title' => ' Acquisti ', 'department' => 'purchasing', 'is_primary' => 'true', 'receives_documents' => 'on', 'access' => 'buyer'],
         ['person_id' => ''],
         ['person_id' => '2', 'job_title' => 'doppione'],
         ['person_id' => '99'],
-        ['person_id' => '3', 'is_primary' => 'true', 'access' => 'boss'],
+        ['person_id' => '3', 'is_primary' => 'true', 'access' => 'boss', 'department' => 'boss'],
     ], [], 'company_id', 1, [2, 3]);
 
     return count($rows) === 2
-        && $rows[0] === ['person_id' => 2, 'job_title' => 'Acquisti', 'is_primary' => 'true', 'receives_documents' => 'true', 'access' => 'buyer', 'deleted' => 'false']
-        && $rows[1]['person_id'] === 3 && $rows[1]['is_primary'] === 'false' && $rows[1]['access'] === 'none';
+        && $rows[0] === ['person_id' => 2, 'job_title' => 'Acquisti', 'is_primary' => 'true', 'receives_documents' => 'true', 'access' => 'buyer', 'department' => 'purchasing', 'deleted' => 'false']
+        && $rows[1]['person_id'] === 3 && $rows[1]['is_primary'] === 'false' && $rows[1]['access'] === 'none' && $rows[1]['department'] === '';
 });
 
 check('normalize: una coppia già esistente riprende id e accesso, preferendo la riga viva', function () {
@@ -200,7 +200,7 @@ check('CompanyRecord::from: campi, referenti con accesso, id esterni', function 
     $seed['companies'][1] += ['email' => 'info@rossi.test', 'pi' => '01234567890', 'is_supplier' => 'true'];
     Query::reset($seed + [
         'contact_relations' => [
-            1 => ['id' => 1, 'company_id' => 1, 'person_id' => 2, 'job_title' => 'Acquisti', 'is_primary' => 'true', 'receives_documents' => 'true', 'access' => 'admin', 'position' => 1, 'deleted' => 'false'],
+            1 => ['id' => 1, 'company_id' => 1, 'person_id' => 2, 'job_title' => 'Acquisti', 'department' => 'administration', 'is_primary' => 'true', 'receives_documents' => 'true', 'access' => 'admin', 'position' => 1, 'deleted' => 'false'],
             2 => ['id' => 2, 'company_id' => 1, 'person_id' => 3, 'is_primary' => 'false', 'receives_documents' => 'false', 'position' => 2, 'deleted' => 'true'],
         ],
         'external_references' => [
@@ -213,7 +213,7 @@ check('CompanyRecord::from: campi, referenti con accesso, id esterni', function 
     return $record['schema'] === CompanyRecord::SCHEMA && $record['entity'] === 'company'
         && $record['business_name'] === 'Rossi srl' && $record['pi'] === '01234567890' && $record['cap'] === ''
         && $record['is_supplier'] === true && !array_key_exists('name', $record)
-        && $record['relations'] === [['person_id' => 2, 'job_title' => 'Acquisti', 'is_primary' => true, 'receives_documents' => true, 'access' => 'admin']]
+        && $record['relations'] === [['person_id' => 2, 'job_title' => 'Acquisti', 'department' => 'administration', 'is_primary' => true, 'receives_documents' => true, 'access' => 'admin']]
         && array_column($record['external_ids'], 'external_id') === ['hs-1']
         && json_encode($record) !== false && CompanyRecord::from(99) === null;
 });
@@ -233,8 +233,36 @@ check('ContactRecord::from: persona con aziende e consensi', function () use ($t
 
     return $record['entity'] === 'contact' && $record['name'] === 'Anna' && $record['birth_date'] === '1990-01-02'
         && !array_key_exists('business_name', $record) && $record['user_id'] === 8
-        && $record['relations'] === [['company_id' => 1, 'job_title' => '', 'is_primary' => true, 'receives_documents' => false, 'access' => 'buyer']]
+        && $record['relations'] === [['company_id' => 1, 'job_title' => '', 'department' => '', 'is_primary' => true, 'receives_documents' => false, 'access' => 'buyer']]
         && $record['consents'] === ['newsletter' => 'granted'];
+});
+
+check('normalize: senza `department` nella riga resta quello di prima', function () {
+    $rows = ContactRelations::normalize(
+        [['person_id' => 2], ['person_id' => 3, 'department' => '']],
+        [['id' => 5, 'person_id' => 2, 'deleted' => 'false', 'department' => 'sales'], ['id' => 6, 'person_id' => 3, 'deleted' => 'false', 'department' => 'sales']],
+        'company_id', 1, [2, 3]
+    );
+
+    return $rows[0]['department'] === 'sales' && $rows[1]['department'] === '';
+});
+
+check('reparti: lista di base, aggiunta da un modulo, filtro dei referenti', function () use ($tables) {
+    ContactRelations::addDepartment('Marketing', 'Marketing');
+    ContactRelations::addDepartment('no spazi', 'X');
+    $keys = array_keys(ContactRelations::departments());
+    Query::reset($tables() + ['contact_relations' => [
+        1 => ['id' => 1, 'company_id' => 1, 'person_id' => 2, 'department' => 'administration', 'position' => 1, 'deleted' => 'false'],
+        2 => ['id' => 2, 'company_id' => 1, 'person_id' => 3, 'department' => 'marketing', 'position' => 2, 'deleted' => 'false'],
+        3 => ['id' => 3, 'company_id' => 4, 'person_id' => 3, 'department' => 'administration', 'position' => 1, 'deleted' => 'false'],
+    ]]);
+    $admin = ContactRelations::peopleByDepartment(1, 'administration');
+    $both = ContactRelations::peopleByDepartment(1, ['administration', 'marketing']);
+
+    return array_slice($keys, 0, 6) === ['administration', 'purchasing', 'sales', 'technical', 'management', 'other']
+        && in_array('marketing', $keys, true) && !in_array('no spazi', $keys, true)
+        && ContactRelations::department('marketing') === 'marketing' && ContactRelations::department('boss') === ''
+        && array_column($admin, 'person_id') === [2] && array_column($both, 'person_id') === [2, 3];
 });
 
 check('fromArray tiene i campi noti, validate dà gli errori del tipo', function () {

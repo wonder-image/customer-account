@@ -4,7 +4,7 @@ namespace Wonder\Plugin\CustomerAccount\Support;
 
 use Wonder\Plugin\CustomerAccount\Models\Company;
 
-/** Il record di un'azienda (vedi `PartyRecord`), con in più `is_supplier`. */
+/** Il record di un'azienda (vedi `PartyRecord`), con in più `is_supplier` e i brand. */
 final class CompanyRecord extends PartyRecord
 {
     public const ENTITY = 'company';
@@ -37,6 +37,10 @@ final class CompanyRecord extends PartyRecord
     protected static function extra(array $record, array $row): array
     {
         $record['is_supplier'] = ($row['is_supplier'] ?? 'false') === 'true';
+        $record['brands'] = array_map(
+            static fn (array $brand): array => ['id' => (int) $brand['id'], 'name' => CompanyBrands::label($brand)],
+            CompanyBrands::of((int) $record['id'])
+        );
 
         return $record;
     }

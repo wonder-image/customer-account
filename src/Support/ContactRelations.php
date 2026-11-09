@@ -22,6 +22,9 @@ final class ContactRelations
 
     private static ?bool $override = null;
 
+    /** @var array<string, string> reparti aggiunti da moduli e siti: chiave => etichetta */
+    private static array $extraDepartments = [];
+
     public static function enabled(): bool
     {
         return self::$override ?? true;
@@ -56,7 +59,7 @@ final class ContactRelations
      * doppioni (vince la prima). Una coppia che esiste già, anche cancellata,
      * riprende l'id della sua riga: così la chiave unica azienda/persona non
      * salta e la riga torna viva. Al massimo un referente principale. Se la
-     * riga non porta `access`, resta quello di prima (`none` per le nuove).
+     * riga non porta `access` o `department`, resta quello di prima.
      *
      * @param list<array<string, mixed>> $posted
      * @param list<array<string, mixed>> $existing tutte le righe del padre, cancellate comprese
@@ -95,6 +98,7 @@ final class ContactRelations
                 'is_primary' => self::flag($row['is_primary'] ?? 'false'),
                 'receives_documents' => self::flag($row['receives_documents'] ?? 'false'),
                 'access' => self::access($row['access'] ?? $existingByCounterpart[$counterpartId]['access'] ?? null),
+                'department' => self::department($row['department'] ?? $existingByCounterpart[$counterpartId]['department'] ?? ''),
                 'deleted' => 'false',
             ];
 
@@ -123,6 +127,67 @@ final class ContactRelations
     public static function access(mixed $value): string
     {
         return in_array($value, ContactRelation::ACCESS, true) ? (string) $value : ContactRelation::ACCESS_NONE;
+    }
+
+    /**
+     * I reparti del referente per un select: quelli di base e quelli aggiunti.
+     *
+     * @return array<string, string>
+     */
+    public static function departments(): array
+    {
+        $out = [];
+
+        foreach (ContactRelation::DEPARTMENTS as $key) {
+            $out[$key] = (string) __t('contacts.department_'.$key);
+        }
+
+        return $out + self::$extraDepartments;
+    }
+
+    /**
+     * Aggiunge un reparto (es. `marketing`) per i select, le email e i sync.
+     * Un modulo lo chiama al boot, un sito in `custom/function`.
+     */
+    public static function addDepartment(string $key, string $label): void
+    {
+        $key = strtolower(trim($key));
+
+        if (preg_match('/^[a-z0-9_]{1,40}$/', $key) === 1) {
+            self::$extraDepartments[$key] = $label;
+        }
+    }
+
+    /** Un reparto valido, altrimenti vuoto (nessun reparto). */
+    public static function department(mixed $value): string
+    {
+        $value = trim((string) $value);
+
+        return array_key_exists($value, self::departments()) ? $value : '';
+    }
+
+    /** L'etichetta di un reparto; vuota se non c'è. */
+    public static function departmentLabel(mixed $value): string
+    {
+        return self::departments()[self::department($value)] ?? '';
+    }
+
+    /**
+     * I referenti di un'azienda in uno o più reparti, con la scheda sotto
+     * `contact`: il punto da cui email, fatture e newsletter scelgono a chi
+     * scrivere (es. `administration` per le fatture).
+     *
+     * @param string|list<string> $departments
+     * @return list<array<string, mixed>>
+     */
+    public static function peopleByDepartment(int $companyId, string|array $departments): array
+    {
+        $wanted = array_map('strval', (array) $departments);
+
+        return array_values(array_filter(
+            self::peopleOf($companyId),
+            static fn (array $row): bool => in_array((string) ($row['department'] ?? ''), $wanted, true)
+        ));
     }
 
     /**
@@ -252,7 +317,7 @@ final class ContactRelations
      * passano da qui.
      *
      * `$rows` sono le righe grezze dell'altro lato (`person_id` o `company_id`,
-     * `job_title`, `is_primary`, `receives_documents`, `access`; dal lato azienda anche
+     * `job_title`, `department`, `is_primary`, `receives_documents`, `access`; dal lato azienda anche
      * `new_name`, `new_surname`, `new_email` per creare la persona). Le righe non
      * presenti si cancellano (soft delete). Emette `ContactEvents::LINKED` e
      * `UNLINKED` per le coppie che cambiano, `CREATED` per le persone nuove.

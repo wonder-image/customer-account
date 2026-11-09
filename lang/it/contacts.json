@@ -3,10 +3,12 @@
   "active": "Scheda attiva", "enabled": "Attiva", "disabled": "Non attiva",
   "addresses": "Indirizzi di spedizione", "address": "Indirizzo di spedizione", "address_label": "Etichetta (opzionale)",
   "invalid": "Controlla lo stato della scheda.",
+  "field_invalid": "Il campo «{{field}}» non è valido.", "field_required": "Compila il campo «{{field}}».",
   "invalid_address": "Controlla il paese e la provincia dell'indirizzo.",
   "invalid_contact": "Contatto non valido: l'indirizzo deve appartenere a una scheda esistente e non può essere trasferito.",
   "csrf": "Sessione del form non valida. Ricarica la pagina e riprova.",
   "relations": "Referenti e aziende", "people": "Referenti", "companies": "Aziende", "person": "Persona", "company": "Azienda", "job_title": "Mansione", "is_primary": "Referente principale", "receives_documents": "Riceve i documenti", "new_name": "Oppure nuova persona: nome", "new_surname": "Cognome", "new_email": "Email", "yes": "Sì", "no": "No", "add_person": "Aggiungi referente", "add_company": "Aggiungi azienda",
   "access": "Accesso all'area clienti", "access_none": "Nessuno", "access_buyer": "Ordina", "access_admin": "Gestisce l'azienda",
-  "is_customer": "Cliente", "is_supplier": "Fornitore"
+  "is_customer": "Cliente", "is_supplier": "Fornitore",
+  "brand": "Brand", "brands": "Brand", "brand_name": "Nome del brand", "brand_required": "Scrivi il nome del brand.", "brand_taken": "Il brand «{{name}}» esiste già.", "brand_not_created": "Il brand non è stato creato.", "brand_existing": "Il brand «{{name}}» esisteva già: l'ho selezionato.", "brand_add": "Nuovo brand", "brands_label": "Brand (nomi commerciali)", "brands_tooltip": "I nomi commerciali con cui l'azienda lavora; un brand può stare su più aziende.", "department": "Reparto", "department_none": "—", "department_administration": "Amministrazione", "department_purchasing": "Acquisti", "department_sales": "Commerciale", "department_technical": "Tecnico", "department_management": "Direzione", "department_other": "Altro"
 }
