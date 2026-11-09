@@ -137,6 +137,10 @@ final class CompanySplitMigration implements ModuleMigration
         try {
             $connection->query("UPDATE `external_references` SET `entity_type` = 'contact' WHERE `entity_type` = 'contacts'");
 
+            // I legami da spostare si leggono prima: un id nuovo di `companies` può coincidere con un id vecchio di `contacts`.
+            $relations = self::relationsOf($connection, $plan[self::MOVE]);
+            $moved = [];
+
             foreach (self::rows($connection) as $row) {
                 $id = (int) $row['id'];
                 $action = self::classify($row);
@@ -149,7 +153,7 @@ final class CompanySplitMigration implements ModuleMigration
 
                 if ($action === self::MOVE) {
                     self::moveAddresses($connection, $id, $companyId, $addressCommon);
-                    self::exec($connection, 'UPDATE `contact_relations` SET `company_id` = ? WHERE `company_id` = ?', [$companyId, $id]);
+                    $moved[$id] = $companyId;
                     self::exec($connection, "UPDATE `external_references` SET `entity_type` = 'company', `entity_id` = ? WHERE `entity_type` = 'contact' AND `entity_id` = ?", [$companyId, $id]);
                     self::exec($connection, "UPDATE `contacts` SET `deleted` = 'true' WHERE `id` = ?", [$id]);
                 } else {
@@ -162,6 +166,10 @@ final class CompanySplitMigration implements ModuleMigration
                 }
 
                 self::exec($connection, 'INSERT INTO `'.self::MAP_TABLE.'` (`contact_id`, `company_id`, `action`) VALUES (?, ?, ?)', [$id, $companyId, $action]);
+            }
+
+            foreach ($relations as $relationId => $contactId) {
+                self::exec($connection, 'UPDATE `contact_relations` SET `company_id` = ? WHERE `id` = ?', [$moved[$contactId], $relationId]);
             }
 
             $connection->query('SET FOREIGN_KEY_CHECKS = 1');
@@ -208,6 +216,28 @@ final class CompanySplitMigration implements ModuleMigration
         self::exec($connection, $sql, array_map(static fn (string $column) => $values[$column], $columns));
 
         return (int) $connection->insert_id;
+    }
+
+    /**
+     * I legami che hanno come azienda una delle schede da spostare.
+     *
+     * @param list<int> $contactIds
+     * @return array<int, int> id del legame → id del contatto
+     */
+    private static function relationsOf(mysqli $connection, array $contactIds): array
+    {
+        if ($contactIds === [] || !self::tableExists($connection, 'contact_relations')) {
+            return [];
+        }
+
+        $ids = implode(', ', array_map('intval', $contactIds));
+        $out = [];
+
+        foreach ($connection->query("SELECT `id`, `company_id` FROM `contact_relations` WHERE `company_id` IN ({$ids})")->fetch_all() as [$id, $contactId]) {
+            $out[(int) $id] = (int) $contactId;
+        }
+
+        return $out;
     }
 
     private static function moveAddresses(mysqli $connection, int $contactId, int $companyId, array $common): void
