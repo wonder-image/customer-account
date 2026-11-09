@@ -2,10 +2,13 @@
 
 namespace Wonder\Plugin\CustomerAccount\Support;
 
+use RuntimeException;
 use Throwable;
+use Wonder\App\Support\RequestMemo;
 use Wonder\Plugin\CustomerAccount\Models\Company;
 use Wonder\Plugin\CustomerAccount\Models\CompanyBrand;
 use Wonder\Plugin\CustomerAccount\Models\CompanyBrandLink;
+use Wonder\Sql\Transaction;
 use Wonder\Support\Text\Slug;
 
 /**
@@ -28,14 +31,18 @@ final class CompanyBrands
      * archiviati ancora legati all'azienda (o, senza azienda, a una
      * qualunque), così chi li ha già non li perde salvando.
      *
+     * Le letture restano in `RequestMemo` per la richiesta (il framework
+     * rivaluta `formSchema()` più volte): una scrittura sulla tabella le svuota.
+     *
      * @return array<int, string>
      */
     public static function options(int $companyId = 0): array
     {
         $out = [];
         $archived = [];
+        $all = RequestMemo::remember(CompanyBrand::$table, 'options', static fn (): array => self::rows(self::safe(static fn () => CompanyBrand::find(['deleted' => 'false']))));
 
-        foreach (self::rows(self::safe(static fn () => CompanyBrand::find(['deleted' => 'false']))) as $row) {
+        foreach ($all as $row) {
             if (self::archived($row)) {
                 $archived[(int) $row['id']] = $row;
                 continue;
@@ -51,7 +58,9 @@ final class CompanyBrands
                 $condition['company_id'] = $companyId;
             }
 
-            foreach (self::links($condition) as $link) {
+            $links = RequestMemo::remember(CompanyBrandLink::$table, 'options:'.$companyId.':'.implode(',', array_keys($archived)), static fn (): array => self::links($condition));
+
+            foreach ($links as $link) {
                 $row = $archived[(int) $link['brand_id']] ?? null;
 
                 if ($row !== null) {
@@ -147,6 +156,29 @@ final class CompanyBrands
     }
 
     /**
+     * Gli id dei brand legati oggi a più aziende, in una query: per chi deve
+     * controllare molti legami insieme (i brand seguiti dai referenti).
+     *
+     * @param list<int> $companyIds
+     * @return array<int, list<int>> azienda => brand, nell'ordine scelto
+     */
+    public static function openIdsByCompany(array $companyIds): array
+    {
+        $companyIds = array_values(array_unique(array_filter(array_map('intval', $companyIds), static fn (int $id): bool => $id > 0)));
+        $out = [];
+
+        if ($companyIds === []) {
+            return $out;
+        }
+
+        foreach (self::links(['company_id' => $companyIds, 'ended_at' => null]) as $link) {
+            $out[(int) $link['company_id']][] = (int) $link['brand_id'];
+        }
+
+        return $out;
+    }
+
+    /**
      * Le aziende (ragioni sociali) legate oggi a un brand.
      *
      * @return list<array<string, mixed>>
@@ -183,8 +215,11 @@ final class CompanyBrands
     /**
      * Il brand è dell'azienda? Senza `$at` vale il legame di oggi; con una
      * data/ora vale anche un legame chiuso dopo, purché aperto prima
-     * (`creation` ≤ `$at` < `ended_at`). Un legame riaperto tiene la sua
+     * (`creation` ≤ `$at` < `ended_at`). Una data senza ora vale fino a fine
+     * giornata (il documento di quel giorno). Un legame riaperto tiene la sua
      * `creation`: per il periodo in cui era staccato risponde comunque sì.
+     * `creation` la scrive MySQL, `ended_at` PHP: se i due fusi orari non
+     * coincidono il confronto sbaglia di quella differenza nelle ore a cavallo.
      */
     public static function belongsTo(int $brandId, int $companyId, ?string $at = null): bool
     {
@@ -203,7 +238,8 @@ final class CompanyBrands
         if ($at === null) {
             $open = $ended === '';
         } else {
-            $time = strtotime($at);
+            $at = trim($at);
+            $time = strtotime(preg_match('/^\d{4}-\d{2}-\d{2}$/', $at) === 1 ? $at.' 23:59:59' : $at);
 
             if ($time === false) {
                 return false;
@@ -294,17 +330,25 @@ final class CompanyBrands
             return ['id' => (int) $existing['id'], 'created' => false, 'brand' => $existing];
         }
 
-        $result = CompanyBrand::create([
-            'code' => CompanyBrand::newCode(),
-            'name' => $name,
-            'slug' => self::slugFor($name),
-            'name_key' => self::nameKey($name),
-            'archived' => 'false',
-        ]);
+        try {
+            $result = CompanyBrand::create([
+                'code' => CompanyBrand::newCode(),
+                'name' => $name,
+                'slug' => self::slugFor($name),
+                'name_key' => self::nameKey($name),
+                'archived' => 'false',
+            ]);
+        } catch (Throwable) {
+            // Un indice univoco violato: di solito un altro «+» con lo stesso nome, appena salvato.
+            $result = null;
+        }
+
         $id = (int) ($result->insert_id ?? 0);
 
         if (!($result->success ?? false) || $id <= 0) {
-            return null;
+            $existing = self::byName($name);
+
+            return $existing !== null ? ['id' => (int) $existing['id'], 'created' => false, 'brand' => $existing] : null;
         }
 
         $brand = self::find($id) ?? ['id' => $id, 'name' => $name];
@@ -327,6 +371,12 @@ final class CompanyBrands
         return null;
     }
 
+    /** Due nomi sono lo stesso nome per `byName()`? (maiuscole, spazi ed entità non contano) */
+    public static function sameName(string $a, string $b): bool
+    {
+        return self::key(self::label(['name' => $a])) === self::key(self::label(['name' => $b]));
+    }
+
     /**
      * I brand non archiviati con un nome uguale a meno di maiuscole, spazi,
      * accenti e punteggiatura («LaPiana» = «La Piana»): i doppioni probabili.
@@ -347,18 +397,26 @@ final class CompanyBrands
         ));
     }
 
-    /** La chiave dei doppioni: il nome in minuscolo, senza accenti, spazi né punteggiatura. */
+    /**
+     * La chiave dei doppioni: il nome in minuscolo, senza accenti, spazi né
+     * punteggiatura. Un nome senza lettere latine tiene lettere e cifre; uno
+     * di soli simboli (emoji) il nome in minuscolo senza spazi: mai vuota se
+     * il nome non lo è, così la migrazione non la riscrive a ogni giro.
+     */
     public static function nameKey(string $name): string
     {
         $name = html_entity_decode(trim($name), ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $key = str_replace(['_', '-'], '', Slug::make($name));
 
-        // Un nome senza lettere latine (es. in cirillico) non sparisce.
         if ($key === '') {
             $key = preg_replace('/[^\p{L}\p{N}]+/u', '', mb_strtolower($name, 'UTF-8')) ?? '';
         }
 
-        return mb_substr($key, 0, 150, 'UTF-8');
+        if ($key === '') {
+            $key = preg_replace('/\s+/u', '', mb_strtolower($name, 'UTF-8')) ?? '';
+        }
+
+        return self::fitColumn($key, 150);
     }
 
     /**
@@ -385,6 +443,31 @@ final class CompanyBrands
     }
 
     /**
+     * Taglia un testo perché entri nella colonna dopo che `Query` ha scritto
+     * i caratteri fuori da latin1 come entità (`&#1052;`): un carattere può
+     * valere fino a dieci posti.
+     */
+    private static function fitColumn(string $value, int $length): string
+    {
+        $out = '';
+        $used = 0;
+
+        foreach (mb_str_split($value, 1, 'UTF-8') as $char) {
+            $codePoint = mb_ord($char, 'UTF-8');
+            $size = $codePoint !== false && $codePoint > 0xFF ? strlen('&#'.$codePoint.';') : 1;
+
+            if ($used + $size > $length) {
+                break;
+            }
+
+            $out .= $char;
+            $used += $size;
+        }
+
+        return $out;
+    }
+
+    /**
      * Scrive i brand di un'azienda: quelli non elencati si staccano (il
      * legame si chiude), quelli già visti si riaprono.
      *
@@ -402,6 +485,25 @@ final class CompanyBrands
             return [];
         }
 
+        // Gli eventi partono dopo il commit: un ascoltatore non vede scritture poi annullate.
+        [$kept, $events] = Transaction::run(static fn (): array => self::writeLinks($companyId, $items));
+
+        foreach ($events as [$event, $payload]) {
+            CompanyEvents::dispatch($event, $payload);
+        }
+
+        return $kept;
+    }
+
+    /**
+     * Le scritture di `sync()`, dentro la sua transazione.
+     *
+     * @param list<int|string|array<string, mixed>> $items
+     * @return array{0: list<int>, 1: list<array{0: string, 1: array<string, mixed>}>} i brand rimasti e gli eventi da emettere
+     */
+    private static function writeLinks(int $companyId, array $items): array
+    {
+        $events = [];
         $before = [];
 
         foreach (self::links(['company_id' => $companyId]) as $link) {
@@ -452,14 +554,19 @@ final class CompanyBrands
                 CompanyBrandLink::query()->Update(CompanyBrandLink::$table, $values, 'id', (int) $before[$id]['id']);
 
                 if ($reopened) {
-                    CompanyEvents::dispatch(CompanyEvents::BRAND_LINKED, self::payload($companyId, $brands[$id], $values['role']));
+                    $events[] = [CompanyEvents::BRAND_LINKED, self::payload($companyId, $brands[$id], $values['role'])];
                 }
 
                 continue;
             }
 
-            CompanyBrandLink::create(['company_id' => $companyId, 'brand_id' => $id] + $values);
-            CompanyEvents::dispatch(CompanyEvents::BRAND_LINKED, self::payload($companyId, $brands[$id], $values['role']));
+            $created = CompanyBrandLink::create(['company_id' => $companyId, 'brand_id' => $id] + $values);
+
+            if (!($created->success ?? false)) {
+                throw new RuntimeException('Legame azienda/brand non salvato.');
+            }
+
+            $events[] = [CompanyEvents::BRAND_LINKED, self::payload($companyId, $brands[$id], $values['role'])];
         }
 
         $gone = array_filter($before, static fn (array $link, int $id): bool => !isset($wanted[$id]) && self::isOpen($link), ARRAY_FILTER_USE_BOTH);
@@ -468,13 +575,16 @@ final class CompanyBrands
 
         foreach ($gone as $id => $link) {
             CompanyBrandLink::query()->Update(CompanyBrandLink::$table, ['ended_at' => $now, 'is_default' => 'false'], 'id', (int) $link['id']);
-            CompanyEvents::dispatch(
+            $events[] = [
                 CompanyEvents::BRAND_UNLINKED,
-                self::payload($companyId, $goneBrands[$id] ?? ['id' => $id], self::role($link['role'] ?? '') ?: CompanyBrandLink::ROLE_OWNER)
-            );
+                self::payload($companyId, $goneBrands[$id] ?? ['id' => $id], self::role($link['role'] ?? '') ?: CompanyBrandLink::ROLE_OWNER),
+            ];
         }
 
-        return array_keys($wanted);
+        // I referenti che seguivano un brand staccato non lo seguono più.
+        ContactRelations::dropBrands($companyId, array_keys($gone));
+
+        return [array_keys($wanted), $events];
     }
 
     /** Archivia un brand: sparisce dalle scelte, resta sui documenti e sui legami. */
@@ -508,41 +618,45 @@ final class CompanyBrands
             return false;
         }
 
-        $target = [];
+        Transaction::run(static function () use ($fromId, $intoId): void {
+            $target = [];
 
-        foreach (self::links(['brand_id' => $intoId]) as $link) {
-            $target[(int) $link['company_id']] = $link;
-        }
-
-        $now = date('Y-m-d H:i:s');
-
-        foreach (self::links(['brand_id' => $fromId]) as $link) {
-            $kept = $target[(int) $link['company_id']] ?? null;
-
-            if ($kept === null) {
-                CompanyBrandLink::query()->Update(CompanyBrandLink::$table, ['brand_id' => $intoId], 'id', (int) $link['id']);
-                continue;
+            foreach (self::links(['brand_id' => $intoId]) as $link) {
+                $target[(int) $link['company_id']] = $link;
             }
 
-            if (!self::isOpen($link)) {
-                continue;
+            $now = date('Y-m-d H:i:s');
+
+            foreach (self::links(['brand_id' => $fromId]) as $link) {
+                $kept = $target[(int) $link['company_id']] ?? null;
+
+                if ($kept === null) {
+                    CompanyBrandLink::query()->Update(CompanyBrandLink::$table, ['brand_id' => $intoId], 'id', (int) $link['id']);
+                    continue;
+                }
+
+                if (!self::isOpen($link)) {
+                    continue;
+                }
+
+                $values = self::isOpen($kept) ? [] : ['ended_at' => null];
+
+                if (($link['is_default'] ?? 'false') === 'true') {
+                    $values['is_default'] = 'true';
+                }
+
+                if ($values !== []) {
+                    CompanyBrandLink::query()->Update(CompanyBrandLink::$table, $values, 'id', (int) $kept['id']);
+                }
+
+                CompanyBrandLink::query()->Update(CompanyBrandLink::$table, ['ended_at' => $now, 'is_default' => 'false'], 'id', (int) $link['id']);
             }
 
-            $values = self::isOpen($kept) ? [] : ['ended_at' => null];
+            ContactRelations::moveBrand($fromId, $intoId);
+            self::archive($fromId);
+        });
 
-            if (($link['is_default'] ?? 'false') === 'true') {
-                $values['is_default'] = 'true';
-            }
-
-            if ($values !== []) {
-                CompanyBrandLink::query()->Update(CompanyBrandLink::$table, $values, 'id', (int) $kept['id']);
-            }
-
-            CompanyBrandLink::query()->Update(CompanyBrandLink::$table, ['ended_at' => $now, 'is_default' => 'false'], 'id', (int) $link['id']);
-        }
-
-        ContactRelations::moveBrand($fromId, $intoId);
-        self::archive($fromId);
+        // Dopo il commit, come in `sync()`.
         CompanyEvents::dispatch(CompanyEvents::BRAND_MERGED, ['from_id' => $fromId, 'into_id' => $intoId, 'brand' => self::find($intoId) ?? $into]);
 
         return true;

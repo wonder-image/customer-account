@@ -17,7 +17,8 @@ use Wonder\Plugin\CustomerAccount\Models\ContactRelationBrand;
  * cliente. Sempre attivi: `enabled()` resta per chi lo chiama e per i test.
  *
  * Un referente può seguire solo alcuni brand dell'azienda
- * (`contact_relation_brands`); senza righe li segue tutti.
+ * (`contact_relation_brands`); senza righe li segue tutti. Contano solo i
+ * brand ancora legati all'azienda: se non ne resta nessuno, li segue tutti.
  */
 final class ContactRelations
 {
@@ -222,7 +223,7 @@ final class ContactRelations
             return $rows;
         }
 
-        $followed = self::brandsByRelation(array_map(static fn (array $row): int => (int) $row['id'], $rows));
+        $followed = self::followedBrands($rows);
 
         return array_values(array_filter(
             $rows,
@@ -241,8 +242,8 @@ final class ContactRelations
     }
 
     /**
-     * I brand seguiti da più legami, in una query. I legami senza righe
-     * (che seguono tutto) non compaiono.
+     * I brand seguiti da più legami. I legami che seguono tutto (senza righe,
+     * o con soli brand non più legati all'azienda) non compaiono.
      *
      * @param list<int> $relationIds
      * @return array<int, list<int>>
@@ -251,17 +252,30 @@ final class ContactRelations
     {
         $relationIds = array_values(array_unique(array_filter(array_map('intval', $relationIds), static fn (int $id): bool => $id > 0)));
 
-        if ($relationIds === []) {
-            return [];
+        return $relationIds === [] ? [] : self::followedBrands(self::rows(ContactRelation::find(['id' => $relationIds])));
+    }
+
+    /**
+     * Toglie i brand che si staccano da un'azienda dai referenti che li
+     * seguivano: lo chiama `CompanyBrands::sync()`.
+     *
+     * @param list<int> $brandIds
+     */
+    public static function dropBrands(int $companyId, array $brandIds): void
+    {
+        $brandIds = array_values(array_filter(array_map('intval', $brandIds), static fn (int $id): bool => $id > 0));
+        $relationIds = array_map(
+            static fn (array $row): int => (int) $row['id'],
+            self::rows(ContactRelation::find([self::COMPANY => $companyId, 'deleted' => ['true', 'false']]))
+        );
+
+        if ($brandIds === [] || $relationIds === []) {
+            return;
         }
 
-        $out = [];
-
-        foreach (self::rows(ContactRelationBrand::find(['relation_id' => $relationIds], null, 'id', 'ASC')) as $row) {
-            $out[(int) $row['relation_id']][] = (int) $row['brand_id'];
+        foreach (self::rows(ContactRelationBrand::find(['relation_id' => $relationIds, 'brand_id' => $brandIds])) as $row) {
+            ContactRelationBrand::delete((int) $row['id']);
         }
-
-        return $out;
     }
 
     /**
@@ -307,7 +321,7 @@ final class ContactRelations
             return [];
         }
 
-        return self::writeBrands($relation, $brandIds);
+        return self::writeBrands($relation, $brandIds, CompanyBrands::openIdsByCompany([(int) $relation[self::COMPANY]])[(int) $relation[self::COMPANY]] ?? []);
     }
 
     /**
@@ -491,9 +505,15 @@ final class ContactRelations
 
         $after = self::liveByCounterpart($parentColumn, $parentId);
 
+        // I brand ammessi si leggono una volta per tutte le aziende delle righe.
+        $allowed = CompanyBrands::openIdsByCompany(array_map(
+            static fn (array $row): int => (int) ($row[self::COMPANY] ?? 0),
+            array_intersect_key($after, $brands)
+        ));
+
         foreach ($brands as $counterpartId => $brandIds) {
             if (isset($after[$counterpartId])) {
-                self::writeBrands($after[$counterpartId], $brandIds);
+                self::writeBrands($after[$counterpartId], $brandIds, $allowed[(int) ($after[$counterpartId][self::COMPANY] ?? 0)] ?? []);
             }
         }
 
@@ -524,11 +544,11 @@ final class ContactRelations
     /**
      * @param array<string, mixed> $relation la riga viva del legame
      * @param list<int|string> $brandIds
+     * @param list<int> $allowed i brand legati oggi all'azienda del legame
      * @return list<int>
      */
-    private static function writeBrands(array $relation, array $brandIds): array
+    private static function writeBrands(array $relation, array $brandIds, array $allowed): array
     {
-        $allowed = CompanyBrands::idsOf((int) ($relation[self::COMPANY] ?? 0));
         $wanted = array_values(array_intersect(array_unique(array_map('intval', $brandIds)), $allowed));
         $current = [];
 
@@ -549,6 +569,51 @@ final class ContactRelations
         }
 
         return $wanted;
+    }
+
+    /**
+     * I brand seguiti dai legami dati, ristretti a quelli ancora legati alla
+     * loro azienda; un legame che resta senza brand li segue tutti e non compare.
+     *
+     * @param list<array<string, mixed>> $relations righe di `contact_relations`
+     * @return array<int, list<int>>
+     */
+    private static function followedBrands(array $relations): array
+    {
+        $companyOf = [];
+
+        foreach ($relations as $relation) {
+            if ((int) ($relation['id'] ?? 0) > 0) {
+                $companyOf[(int) $relation['id']] = (int) ($relation[self::COMPANY] ?? 0);
+            }
+        }
+
+        if ($companyOf === []) {
+            return [];
+        }
+
+        $stored = [];
+
+        foreach (self::rows(ContactRelationBrand::find(['relation_id' => array_keys($companyOf)], null, 'id', 'ASC')) as $row) {
+            $stored[(int) $row['relation_id']][] = (int) $row['brand_id'];
+        }
+
+        if ($stored === []) {
+            return [];
+        }
+
+        $open = CompanyBrands::openIdsByCompany(array_values(array_intersect_key($companyOf, $stored)));
+        $out = [];
+
+        foreach ($stored as $relationId => $brandIds) {
+            $kept = array_values(array_intersect($brandIds, $open[$companyOf[$relationId]] ?? []));
+
+            if ($kept !== []) {
+                $out[$relationId] = $kept;
+            }
+        }
+
+        return $out;
     }
 
     /** @return array<int, array<string, mixed>> le righe vive per id della controparte */

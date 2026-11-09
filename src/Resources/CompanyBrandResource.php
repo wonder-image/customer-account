@@ -80,7 +80,10 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
      * Passano solo nome, note e archiviazione. Lo slug nasce dal nome alla
      * creazione (univoco, con `-1`, `-2`…), il codice lo dà il framework
      * (`uniqueCode`); `name_key` segue il nome. Un nome identico a quello di
-     * un altro brand non archiviato si rifiuta.
+     * un altro brand non archiviato si rifiuta, ma solo in creazione o se il
+     * nome cambia: un doppione storico (o il brand archiviato da `merge()`)
+     * si può ancora correggere e archiviare. Un brand che resta archiviato
+     * non si controlla.
      */
     public static function mutateRequestValues(array $values, string $action, string $context = 'backend', ?array $oldValues = null): array
     {
@@ -92,14 +95,15 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
             throw new InvalidArgumentException((string) __t('contacts.brand_required'));
         }
 
-        $same = CompanyBrands::byName($name);
+        $values['archived'] = $action === 'update' ? ContactRelations::flag($values['archived'] ?? ($oldValues['archived'] ?? 'false')) : 'false';
+        $renamed = $action !== 'update' || !CompanyBrands::sameName($name, (string) ($oldValues['name'] ?? ''));
+        $same = $renamed && $values['archived'] === 'false' ? CompanyBrands::byName($name) : null;
 
         if ($same !== null && (int) $same['id'] !== $id) {
             throw new InvalidArgumentException((string) __t('contacts.brand_taken', ['name' => CompanyBrands::label($same)]));
         }
 
         $values['name_key'] = CompanyBrands::nameKey($name);
-        $values['archived'] = $action === 'update' ? ContactRelations::flag($values['archived'] ?? ($oldValues['archived'] ?? 'false')) : 'false';
 
         if ($action === 'store') {
             $values['slug'] = CompanyBrands::slugFor($name);

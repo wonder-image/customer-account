@@ -73,7 +73,8 @@ final class CompanyBrandCodesMigration implements ModuleMigration
                 $values['slug'] = CompanyBrands::slugFor($name, (int) $row['id']);
             }
 
-            if (trim((string) ($row['name_key'] ?? '')) === '') {
+            // `nameKey()` non è mai vuota per un nome non vuoto: la riga non si riscrive al giro dopo.
+            if (trim((string) ($row['name_key'] ?? '')) === '' && CompanyBrands::nameKey($name) !== '') {
                 $values['name_key'] = CompanyBrands::nameKey($name);
             }
 

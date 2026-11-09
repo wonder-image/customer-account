@@ -314,4 +314,89 @@ check('CompanyRecord: i brand legati con codice, slug, ruolo e predefinito', fun
     ] && json_encode($record) !== false;
 });
 
+check('findOrCreate: se l\'insert fallisce (un altro «+» con lo stesso nome) riprende il brand appena nato', function () use ($seed, $brand, $events) {
+    Query::reset($seed());
+    $events();
+    Query::$beforeInsert = static function (string $table) use ($brand): void {
+        Query::$tables['company_brands'][9] = $brand(9, 'Villa Priula', 'villa-priula', 'villapriula');
+        throw new RuntimeException('Duplicate entry');
+    };
+    $race = CompanyBrands::findOrCreate('villa priula');
+    Query::$beforeInsert = static function (): void { throw new RuntimeException('Duplicate entry'); };
+    $lost = CompanyBrands::findOrCreate('Nessuno');
+    Query::$beforeInsert = null;
+    ContactEvents::reset();
+
+    return $race['id'] === 9 && $race['created'] === false && $lost === null;
+});
+
+check('sync: un errore annulla tutto il salvataggio e non emette eventi', function () use ($seed, $link, $events) {
+    $tables = $seed();
+    $tables['company_brand_links'][1] = $link(1, 1, 1);
+    Query::reset($tables);
+    $before = Query::$tables;
+    $events();
+    Query::$beforeInsert = static function (string $table): void {
+        if ($table === 'company_brand_links') {
+            throw new RuntimeException('Duplicate entry');
+        }
+    };
+
+    try {
+        CompanyBrands::sync(1, [2]);
+        $thrown = false;
+    } catch (RuntimeException) {
+        $thrown = true;
+    }
+
+    Query::$beforeInsert = null;
+    $seen = $GLOBALS['__brand_events'];
+    ContactEvents::reset();
+
+    return $thrown && Query::$tables === $before && $seen === [] && CompanyBrands::idsOf(1) === [1];
+});
+
+check('belongsTo: una data senza ora vale fino a fine giornata', function () use ($seed, $link) {
+    $tables = $seed();
+    $tables['company_brand_links'][1] = $link(1, 1, 1, ['creation' => '2026-03-01 10:00:00', 'ended_at' => '2026-03-05 09:00:00']);
+    Query::reset($tables);
+
+    return CompanyBrands::belongsTo(1, 1, '2026-03-01') && !CompanyBrands::belongsTo(1, 1, '2026-03-01 09:00')
+        && CompanyBrands::belongsTo(1, 1, '2026-03-04') && !CompanyBrands::belongsTo(1, 1, '2026-03-05');
+});
+
+check('form del brand: un doppione storico si modifica e si archivia; rinominarlo su un nome preso no', function () use ($seed, $brand) {
+    $tables = $seed();
+    $tables['company_brands'][4] = $brand(4, 'La Piana', 'la-piana-1', 'lapiana');
+    Query::reset($tables);
+    $edit = CompanyBrandResource::mutateRequestValues(['name' => 'La Piana', 'note' => 'doppione'], 'update', 'backend', ['id' => 4, 'name' => 'La Piana', 'archived' => 'false']);
+    $archive = CompanyBrandResource::mutateRequestValues(['name' => 'la  piana', 'archived' => 'true'], 'update', 'backend', ['id' => 4, 'name' => 'La Piana', 'archived' => 'false']);
+    $archivedRename = CompanyBrandResource::mutateRequestValues(['name' => 'RClass', 'archived' => 'true'], 'update', 'backend', ['id' => 4, 'name' => 'La Piana', 'archived' => 'true']);
+
+    try {
+        CompanyBrandResource::mutateRequestValues(['name' => 'rclass'], 'update', 'backend', ['id' => 4, 'name' => 'La Piana', 'archived' => 'false']);
+        $taken = false;
+    } catch (InvalidArgumentException) {
+        $taken = true;
+    }
+
+    return $edit['note'] === 'doppione' && $archive['archived'] === 'true' && $archivedRename['name'] === 'RClass' && $taken;
+});
+
+check('nameKey: mai vuota per un nome di soli simboli, e dentro la colonna anche in cirillico', function () {
+    Query::reset(['company_brands' => [
+        1 => ['id' => 1, 'name' => '★ ★', 'deleted' => 'false'],
+        2 => ['id' => 2, 'name' => '★★', 'deleted' => 'false'],
+    ]]);
+    CompanyBrandCodesMigration::backfill();
+    $again = CompanyBrandCodesMigration::backfill();
+    $long = CompanyBrands::nameKey(str_repeat('Москва', 40));
+    $encoded = preg_replace_callback('/[^\x{0000}-\x{00FF}]/u', static fn (array $m): string => '&#'.mb_ord($m[0], 'UTF-8').';', $long);
+
+    return CompanyBrands::nameKey('★ ★') === '★★' && $again === 0
+        && array_column(CompanyBrands::similar('★★'), 'id') === [1, 2]
+        && $long !== '' && strlen($encoded) <= 150 && strlen($encoded) > 140
+        && CompanyBrands::nameKey('Москва') === 'москва';
+});
+
 summary();
