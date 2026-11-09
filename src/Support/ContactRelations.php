@@ -7,6 +7,7 @@ use Wonder\App\ResourceSchema\RepeaterRelation;
 use Wonder\Plugin\CustomerAccount\Models\Company;
 use Wonder\Plugin\CustomerAccount\Models\Contact;
 use Wonder\Plugin\CustomerAccount\Models\ContactRelation;
+use Wonder\Plugin\CustomerAccount\Models\ContactRelationBrand;
 
 /**
  * I legami fra aziende (`companies`) e persone (`contacts`), in `contact_relations`.
@@ -14,6 +15,9 @@ use Wonder\Plugin\CustomerAccount\Models\ContactRelation;
  * Una persona può essere referente di più aziende, un'azienda può avere più
  * referenti. `access` dice cosa può fare la persona per l'azienda nell'area
  * cliente. Sempre attivi: `enabled()` resta per chi lo chiama e per i test.
+ *
+ * Un referente può seguire solo alcuni brand dell'azienda
+ * (`contact_relation_brands`); senza righe li segue tutti.
  */
 final class ContactRelations
 {
@@ -207,11 +211,130 @@ final class ContactRelations
      * I referenti di un'azienda, in ordine: ogni riga del legame con la
      * scheda della persona sotto `contact`.
      *
+     * @param int $brandId se c'è, solo chi segue quel brand o tutti i brand
      * @return list<array<string, mixed>>
      */
-    public static function peopleOf(int $companyId): array
+    public static function peopleOf(int $companyId, int $brandId = 0): array
     {
-        return self::linked(self::COMPANY, $companyId);
+        $rows = self::linked(self::COMPANY, $companyId);
+
+        if ($brandId <= 0 || $rows === []) {
+            return $rows;
+        }
+
+        $followed = self::brandsByRelation(array_map(static fn (array $row): int => (int) $row['id'], $rows));
+
+        return array_values(array_filter(
+            $rows,
+            static fn (array $row): bool => !isset($followed[(int) $row['id']]) || in_array($brandId, $followed[(int) $row['id']], true)
+        ));
+    }
+
+    /**
+     * I brand che segue un referente; vuoto = tutti quelli dell'azienda.
+     *
+     * @return list<int>
+     */
+    public static function brandsOf(int $relationId): array
+    {
+        return self::brandsByRelation([$relationId])[$relationId] ?? [];
+    }
+
+    /**
+     * I brand seguiti da più legami, in una query. I legami senza righe
+     * (che seguono tutto) non compaiono.
+     *
+     * @param list<int> $relationIds
+     * @return array<int, list<int>>
+     */
+    public static function brandsByRelation(array $relationIds): array
+    {
+        $relationIds = array_values(array_unique(array_filter(array_map('intval', $relationIds), static fn (int $id): bool => $id > 0)));
+
+        if ($relationIds === []) {
+            return [];
+        }
+
+        $out = [];
+
+        foreach (self::rows(ContactRelationBrand::find(['relation_id' => $relationIds], null, 'id', 'ASC')) as $row) {
+            $out[(int) $row['relation_id']][] = (int) $row['brand_id'];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Le righe di un repeater dei referenti con `brand_ids` (i brand seguiti),
+     * per mostrarli nel form: la colonna non è di `contact_relations`.
+     *
+     * @param list<array<string, mixed>> $rows
+     * @return list<array<string, mixed>>
+     */
+    public static function withBrandIds(array $rows): array
+    {
+        $ids = [];
+
+        foreach ($rows as $row) {
+            if (is_array($row) && !array_key_exists('brand_ids', $row) && (int) ($row['id'] ?? 0) > 0) {
+                $ids[] = (int) $row['id'];
+            }
+        }
+
+        $followed = self::brandsByRelation($ids);
+
+        foreach ($rows as $key => $row) {
+            if (is_array($row) && !array_key_exists('brand_ids', $row)) {
+                $rows[$key]['brand_ids'] = $followed[(int) ($row['id'] ?? 0)] ?? [];
+            }
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Scrive i brand seguiti da un referente: solo brand legati oggi alla sua
+     * azienda, gli altri si ignorano. Una lista vuota = tutti i brand.
+     *
+     * @param list<int|string> $brandIds
+     * @return list<int> i brand rimasti
+     */
+    public static function setBrands(int $relationId, array $brandIds): array
+    {
+        $relation = $relationId > 0 ? ContactRelation::findById($relationId) : null;
+
+        if (!is_array($relation) || !isset($relation['id']) || ($relation['deleted'] ?? 'false') !== 'false') {
+            return [];
+        }
+
+        return self::writeBrands($relation, $brandIds);
+    }
+
+    /**
+     * Sposta i referenti da un brand a un altro: lo chiama
+     * `CompanyBrands::merge()`. Chi seguiva già il brand di arrivo perde la
+     * riga doppia.
+     */
+    public static function moveBrand(int $fromId, int $intoId): void
+    {
+        $rows = self::rows(ContactRelationBrand::find(['brand_id' => $fromId]));
+
+        if ($rows === [] || $intoId <= 0) {
+            return;
+        }
+
+        $taken = array_flip(array_map(
+            static fn (array $row): int => (int) $row['relation_id'],
+            self::rows(ContactRelationBrand::find(['brand_id' => $intoId, 'relation_id' => array_map(static fn (array $row): int => (int) $row['relation_id'], $rows)]))
+        ));
+
+        foreach ($rows as $row) {
+            if (isset($taken[(int) $row['relation_id']])) {
+                ContactRelationBrand::delete((int) $row['id']);
+            } else {
+                ContactRelationBrand::query()->Update(ContactRelationBrand::$table, ['brand_id' => $intoId], 'id', (int) $row['id']);
+            }
+        }
     }
 
     /**
@@ -317,7 +440,7 @@ final class ContactRelations
      * passano da qui.
      *
      * `$rows` sono le righe grezze dell'altro lato (`person_id` o `company_id`,
-     * `job_title`, `department`, `is_primary`, `receives_documents`, `access`; dal lato azienda anche
+     * `job_title`, `department`, `is_primary`, `receives_documents`, `access`, `brand_ids`; dal lato azienda anche
      * `new_name`, `new_surname`, `new_email` per creare la persona). Le righe non
      * presenti si cancellano (soft delete). Emette `ContactEvents::LINKED` e
      * `UNLINKED` per le coppie che cambiano, `CREATED` per le persone nuove.
@@ -338,6 +461,17 @@ final class ContactRelations
             $rows = array_map(static fn (array $row): array => self::createPerson($row, $payload), $rows);
         }
 
+        // I brand seguiti non sono colonne del legame: si scrivono dopo, solo per le righe che li portano.
+        $brands = [];
+
+        foreach ($rows as $row) {
+            $counterpartId = (int) ($row[$other] ?? 0);
+
+            if ($counterpartId > 0 && !isset($brands[$counterpartId]) && array_key_exists('brand_ids', $row)) {
+                $brands[$counterpartId] = is_array($row['brand_ids']) ? $row['brand_ids'] : [$row['brand_ids']];
+            }
+        }
+
         $before = self::liveByCounterpart($parentColumn, $parentId);
         $valid = self::existingCounterparts($parentColumn, array_map(static fn (array $row): int => (int) ($row[$other] ?? 0), $rows));
         $clean = self::normalize($rows, self::allRowsOf($parentColumn, $parentId), $parentColumn, $parentId, $valid);
@@ -356,6 +490,12 @@ final class ContactRelations
         }
 
         $after = self::liveByCounterpart($parentColumn, $parentId);
+
+        foreach ($brands as $counterpartId => $brandIds) {
+            if (isset($after[$counterpartId])) {
+                self::writeBrands($after[$counterpartId], $brandIds);
+            }
+        }
 
         foreach (array_diff_key($after, $before) as $row) {
             ContactEvents::dispatch(ContactEvents::LINKED, self::eventPayload($row));
@@ -379,6 +519,36 @@ final class ContactRelations
                 ContactRelation::query()->Update(ContactRelation::$table, ['is_primary' => 'false'], 'id', (int) $row['id']);
             }
         }
+    }
+
+    /**
+     * @param array<string, mixed> $relation la riga viva del legame
+     * @param list<int|string> $brandIds
+     * @return list<int>
+     */
+    private static function writeBrands(array $relation, array $brandIds): array
+    {
+        $allowed = CompanyBrands::idsOf((int) ($relation[self::COMPANY] ?? 0));
+        $wanted = array_values(array_intersect(array_unique(array_map('intval', $brandIds)), $allowed));
+        $current = [];
+
+        foreach (self::rows(ContactRelationBrand::find(['relation_id' => (int) $relation['id']])) as $row) {
+            $current[(int) $row['brand_id']] = (int) $row['id'];
+        }
+
+        foreach ($wanted as $brandId) {
+            if (!isset($current[$brandId])) {
+                ContactRelationBrand::create(['relation_id' => (int) $relation['id'], 'brand_id' => $brandId]);
+            }
+        }
+
+        foreach ($current as $brandId => $rowId) {
+            if (!in_array($brandId, $wanted, true)) {
+                ContactRelationBrand::delete($rowId);
+            }
+        }
+
+        return $wanted;
     }
 
     /** @return array<int, array<string, mixed>> le righe vive per id della controparte */

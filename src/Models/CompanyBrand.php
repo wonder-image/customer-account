@@ -3,6 +3,7 @@
 namespace Wonder\Plugin\CustomerAccount\Models;
 
 use Wonder\App\Model;
+use Wonder\App\Support\ModelCode;
 use Wonder\App\Support\SyncSchema;
 use Wonder\Data\UploadSchema as Field;
 use Wonder\Sql\TableSchema as Column;
@@ -14,9 +15,17 @@ use Wonder\Sql\TableSchema as Column;
  * Un brand può stare su più ragioni sociali e una ragione sociale può avere
  * più brand: il legame è in `CompanyBrandLink`. Lo legge e scrive
  * `Support\CompanyBrands`.
+ *
+ * `code` e `slug` sono univoci e non cambiano dopo la creazione: i moduli
+ * esterni (preventivi, progetti, sync) li usano per riconoscerlo.
+ * `name_key` è il nome senza maiuscole, spazi e punteggiatura: serve a
+ * trovare i doppioni con una query sull'indice. Un brand `archived` non si
+ * propone più nelle scelte, ma resta leggibile sui documenti che lo usano.
  */
 class CompanyBrand extends Model
 {
+    public const CODE_PREFIX = 'cbr_';
+
     public static string $table = 'company_brands';
     public static string $folder = 'contacts';
     public static string $icon = 'bi bi-award';
@@ -29,21 +38,37 @@ class CompanyBrand extends Model
     public static function tableSchema(): array
     {
         return [
+            ...static::sqlColumnsFromDataSchema(['code']),
             Column::key('name')->length(150),
+            Column::key('slug')->length(150)->unique(),
+            Column::key('name_key')->length(150),
             Column::key('note')->type('TEXT'),
+            Column::key('archived')->enum(['true', 'false'])->default('false'),
         ];
     }
 
     public static function tablePseudos(): array
     {
-        return ['ind_name' => ['index' => 'name']];
+        return [
+            'ind_name' => ['index' => 'name'],
+            'ind_name_key' => ['index' => 'name_key'],
+        ];
     }
 
     public static function dataSchema(): array
     {
         return [
+            Field::key('code')->text()->uniqueCode(self::CODE_PREFIX),
             Field::key('name')->text(),
+            Field::key('slug')->text()->slug()->readonlyOnUpdate()->immutableOnUpdate(),
+            Field::key('name_key')->text()->sanitize(false),
             Field::key('note')->text(),
+            Field::key('archived')->text()->sanitize(false),
         ];
+    }
+
+    public static function newCode(): string
+    {
+        return ModelCode::make(static::class, self::CODE_PREFIX);
     }
 }

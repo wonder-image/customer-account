@@ -9,6 +9,7 @@ use Wonder\App\ResourceSchema\RepeaterColumn;
 use Wonder\App\ResourceSchema\RepeaterRelation;
 use Wonder\App\Support\Repeater;
 use Wonder\Plugin\CustomerAccount\Models\ContactRelation;
+use Wonder\Plugin\CustomerAccount\Support\CompanyBrands;
 use Wonder\Plugin\CustomerAccount\Support\ContactRelations;
 
 /**
@@ -67,6 +68,7 @@ trait HasContactRelations
             RepeaterColumn::key('job_title')->text()->label(static::relationText('job_title'))->columnSpan(3),
             static::departmentColumn(),
             ...static::relationFlagColumns(),
+            static::relationBrandsColumn(),
         ], static::relationText('add_person'));
     }
 
@@ -95,6 +97,19 @@ trait HasContactRelations
             ->value('')
             ->label(static::relationText('department'))
             ->columnSpan(3);
+    }
+
+    /**
+     * I brand che il referente segue (vuoto = tutti). Le scelte sono tutti i
+     * brand: il form non sa quale azienda mostra, e `ContactRelations`
+     * tiene solo quelli legati all'azienda della riga.
+     */
+    protected static function relationBrandsColumn(): Input
+    {
+        return RepeaterColumn::key('brand_ids')
+            ->selectSearch(CompanyBrands::options(), true)
+            ->label(static::relationText('relation_brands'))
+            ->columnSpan(12);
     }
 
     /**
@@ -219,6 +234,26 @@ trait HasContactRelations
      */
     protected static function relationPersonPayload(array $values): array
     {
+        return $values;
+    }
+
+    /**
+     * Le righe dei referenti si leggono da `contact_relations`: i brand
+     * seguiti stanno in un'altra tabella e si aggiungono qui, altrimenti la
+     * colonna vuota li cancellerebbe al salvataggio.
+     */
+    public static function hydrateRepeaterFormValues(
+        array $values,
+        int|string|null $parentId = null,
+        ?array $post = null,
+        ?array $files = null
+    ): array {
+        $values = parent::hydrateRepeaterFormValues($values, $parentId, $post, $files);
+
+        if (static::relationSide() === ContactRelations::COMPANY && is_array($values[self::RELATION_PEOPLE] ?? null)) {
+            $values[self::RELATION_PEOPLE] = ContactRelations::withBrandIds($values[self::RELATION_PEOPLE]);
+        }
+
         return $values;
     }
 

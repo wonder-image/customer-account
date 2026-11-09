@@ -7,7 +7,7 @@ namespace Wonder\Plugin\CustomerAccount\Support;
  * (`listen()` o `events.listeners` nella configurazione del modulo): cambia
  * solo il nome dell'evento. I legami azienda/persona restano
  * `ContactEvents::LINKED` e `UNLINKED`; quelli azienda/brand sono
- * `BRAND_LINKED` e `BRAND_UNLINKED`.
+ * `BRAND_LINKED`, `BRAND_UNLINKED` e `BRAND_MERGED`.
  */
 final class CompanyEvents
 {
@@ -17,12 +17,14 @@ final class CompanyEvents
     public const UPDATED = 'company.updated';
     /** payload: `id`, `brand` (la riga di `company_brands`) */
     public const BRAND_CREATED = 'company.brand_created';
-    /** payload: `company_id`, `brand_id`, `brand` */
+    /** payload: `company_id`, `brand_id`, `brand`, `role` (anche un legame chiuso che si riapre) */
     public const BRAND_LINKED = 'company.brand_linked';
-    /** payload: `company_id`, `brand_id`, `brand` */
+    /** payload: `company_id`, `brand_id`, `brand`, `role` (il legame si chiude, non si cancella) */
     public const BRAND_UNLINKED = 'company.brand_unlinked';
+    /** payload: `from_id`, `into_id`, `brand` (quello di arrivo): chi punta a `from_id` passa a `into_id` */
+    public const BRAND_MERGED = 'company.brand_merged';
 
-    public const EVENTS = [self::CREATED, self::UPDATED, self::BRAND_CREATED, self::BRAND_LINKED, self::BRAND_UNLINKED];
+    public const EVENTS = [self::CREATED, self::UPDATED, self::BRAND_CREATED, self::BRAND_LINKED, self::BRAND_UNLINKED, self::BRAND_MERGED];
 
     public static function listen(string $event, callable|string $listener): void
     {

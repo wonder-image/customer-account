@@ -2,8 +2,9 @@
 /**
  * Database finto in memoria per i test: sostituisce `Wonder\Sql\Connection` e `Wonder\Sql\Query`
  * prima che l'autoload carichi quelle vere. Va richiesto PRIMA di `bootstrap.php`.
- * Copre solo quello che usano i Model del modulo: condizioni come array di uguaglianze,
- * ordinamento su una colonna, limit e `MAX(col) AS alias`.
+ * Copre solo quello che usano i Model del modulo: condizioni come array di uguaglianze
+ * (un valore lista vale `IN`, `null` vale `IS NULL`), ordinamento su una colonna, limit e
+ * `MAX(col) AS alias`.
  */
 declare(strict_types=1);
 
@@ -129,7 +130,15 @@ namespace Wonder\Sql {
                 static function (array $row) use ($condition): bool {
                     foreach ((array) $condition as $column => $value) {
                         $column = trim((string) $column, '` ');
-                        if ((string) ($row[$column] ?? '') !== (string) $value) {
+                        if (is_array($value)) {
+                            if (!in_array((string) ($row[$column] ?? ''), array_map('strval', $value), true)) {
+                                return false;
+                            }
+                        } elseif ($value === null) {
+                            if (($row[$column] ?? null) !== null) {
+                                return false;
+                            }
+                        } elseif ((string) ($row[$column] ?? '') !== (string) $value) {
                             return false;
                         }
                     }
