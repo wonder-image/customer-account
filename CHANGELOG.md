@@ -24,6 +24,7 @@
 
 ### Removed
 
+- Le colonne «Nome», «Cognome» ed «Email» per creare una persona dentro una riga dei referenti: la persona nuova si crea dalla finestra del modulo che usa il repeater (nel gestionale «Nuovo referente») e si sceglie dalla tendina. `ContactRelations::createPerson()` resta.
 - Il tipo `private`/`business` delle schede: `ContactRelations::typesOf()`, la chiave `type` di `ContactRecord` e la colonna «Tipo» dell'export.
 
 ### Deprecated

@@ -62,9 +62,6 @@ trait HasContactRelations
                 ->label(static::relationText('person'))
                 ->columnSpan(6),
             RepeaterColumn::key('job_title')->text()->label(static::relationText('job_title'))->columnSpan(6),
-            RepeaterColumn::key('new_name')->text()->label(static::relationText('new_name'))->columnSpan(4),
-            RepeaterColumn::key('new_surname')->text()->label(static::relationText('new_surname'))->columnSpan(4),
-            RepeaterColumn::key('new_email')->email()->label(static::relationText('new_email'))->columnSpan(4),
             ...static::relationFlagColumns(),
         ], static::relationText('add_person'));
     }
