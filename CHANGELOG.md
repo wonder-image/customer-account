@@ -15,6 +15,7 @@
 - `contact_relations.access` (`none`, `buyer`, `admin`), colonna «Accesso» nei repeater, `ContactRelations::accessOf()` e filtro `companiesOf($personId, $access)`.
 - `CompanyRecord` e la base comune `PartyRecord`; eventi `company.created` / `company.updated` (`CompanyEvents`).
 - `ContactExport::PERSON_FIELDS` e `COMPANY_FIELDS`; `columns()` accetta l'elenco dei campi.
+- `AccountBilling::saveCompany()`: salva la fatturazione di un'azienda con la stessa validazione della scheda; il permesso lo controlla chi chiama (l'ecommerce lo fa solo per gli `admin`).
 - Traduzioni delle aziende e degli accessi (`contacts.json`, it/en).
 
 ### Removed
