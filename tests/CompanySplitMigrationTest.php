@@ -26,6 +26,13 @@ check('colonne copiate: solo quelle comuni, senza id, codice e campi della perso
     return Migration::commonColumns($contacts, $companies) === ['business_name', 'pi', 'email', 'creation'];
 });
 
+check('il codice dell\'azienda tiene il suffisso del contatto', function () {
+    return Migration::codeFromContact('con_demo-filati-nord') === 'cmp_demo-filati-nord'
+        && Migration::codeFromContact('con_') === null
+        && Migration::codeFromContact('') === null
+        && Migration::codeFromContact('altro') === null;
+});
+
 check('colonne degli indirizzi: esclusione scelta da chi chiama', function () {
     return Migration::commonColumns(['id', 'contact_id', 'street', 'city', 'deleted'], ['id', 'company_id', 'street', 'city', 'deleted'], ['id', 'contact_id', 'deleted'])
         === ['street', 'city'];

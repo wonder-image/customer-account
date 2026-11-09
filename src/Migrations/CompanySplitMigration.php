@@ -205,7 +205,7 @@ final class CompanySplitMigration implements ModuleMigration
             $values['is_customer'] = 'false';
         }
 
-        $values['code'] = Company::newCode();
+        $values['code'] = self::companyCode($connection, (string) ($row['code'] ?? ''));
         $values['is_supplier'] = ($row['is_supplier'] ?? '') === 'true' ? 'true' : 'false';
         $values['deleted'] = 'false';
 
@@ -216,6 +216,41 @@ final class CompanySplitMigration implements ModuleMigration
         self::exec($connection, $sql, array_map(static fn (string $column) => $values[$column], $columns));
 
         return (int) $connection->insert_id;
+    }
+
+    /**
+     * Il codice dell'azienda nato da quello del contatto: stesso suffisso con
+     * `cmp_`, così chi riconosce le righe dal codice (i dati di prova) le
+     * ritrova. `null` se il contatto non aveva un codice suo.
+     */
+    public static function codeFromContact(string $contactCode): ?string
+    {
+        return str_starts_with($contactCode, 'con_') && strlen($contactCode) > 4
+            ? 'cmp_'.substr($contactCode, 4)
+            : null;
+    }
+
+    /** Il codice dell'azienda: quello del contatto, o uno nuovo se manca o è già preso. */
+    private static function companyCode(mysqli $connection, string $contactCode): string
+    {
+        $code = self::codeFromContact($contactCode);
+
+        if ($code === null) {
+            return Company::newCode();
+        }
+
+        $statement = $connection->prepare('SELECT 1 FROM `'.self::table(Company::class).'` WHERE `code` = ? LIMIT 1');
+
+        if ($statement === false) {
+            return Company::newCode();
+        }
+
+        $statement->bind_param('s', $code);
+        $statement->execute();
+        $taken = ($statement->get_result()?->num_rows ?? 0) > 0;
+        $statement->close();
+
+        return $taken ? Company::newCode() : $code;
     }
 
     /**
