@@ -3,6 +3,7 @@
   "active": "Active contact", "enabled": "Active", "disabled": "Inactive",
   "addresses": "Shipping addresses", "address": "Shipping address", "address_label": "Label (optional)",
   "invalid": "Check the record status.",
+  "field_invalid": "The field “{{field}}” is not valid.", "field_required": "Fill in the field “{{field}}”.",
   "invalid_address": "Check the address country and province.",
   "invalid_contact": "Invalid contact: the address must belong to an existing contact and cannot be transferred.",
   "csrf": "Invalid form session. Reload the page and try again.",

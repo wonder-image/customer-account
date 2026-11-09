@@ -3,6 +3,7 @@
   "active": "Scheda attiva", "enabled": "Attiva", "disabled": "Non attiva",
   "addresses": "Indirizzi di spedizione", "address": "Indirizzo di spedizione", "address_label": "Etichetta (opzionale)",
   "invalid": "Controlla lo stato della scheda.",
+  "field_invalid": "Il campo «{{field}}» non è valido.", "field_required": "Compila il campo «{{field}}».",
   "invalid_address": "Controlla il paese e la provincia dell'indirizzo.",
   "invalid_contact": "Contatto non valido: l'indirizzo deve appartenere a una scheda esistente e non può essere trasferito.",
   "csrf": "Sessione del form non valida. Ricarica la pagina e riprova.",

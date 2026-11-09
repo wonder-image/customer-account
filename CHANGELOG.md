@@ -22,6 +22,8 @@
 
 ### Fixed
 
+- Gli errori di validazione di `ContactResource` e `ContactAddressResource` mostrano il testo e non la chiave: usavano `account.validation.invalid` / `required`, che non esistono; ora `contacts.field_invalid` e `contacts.field_required`.
+
 - Gli indirizzi di consegna mai compilati non si salvano più solo perché la nazione è precompilata su `IT` (o «Predefinito» su No): `HasContactRelations::syncRepeaterRelations()` passa `Repeater::columnDefaults()` di `wonder-image/app`.
 
 ### Removed

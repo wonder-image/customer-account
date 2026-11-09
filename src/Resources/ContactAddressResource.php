@@ -78,7 +78,7 @@ class ContactAddressResource extends ContactResource
             throw new InvalidArgumentException((string) __t('contacts.invalid_contact'));
         }
         if (isset($values['label']) && (!is_string($values['label']) || mb_strlen($values['label']) > 100)) {
-            throw new InvalidArgumentException((string) __t('account.validation.invalid', ['field' => static::labelSchema()['label']]));
+            throw new InvalidArgumentException((string) __t('contacts.field_invalid', ['field' => static::labelSchema()['label']]));
         }
         $errors = AccountAddressValidation::validate(static::$model::address(), $values);
         if ($errors !== []) { throw new InvalidArgumentException(implode("\n", $errors)); }

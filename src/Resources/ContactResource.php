@@ -135,7 +135,7 @@ class ContactResource extends Resource
         static::verifyFormToken($values);
         $values = array_intersect_key($values, static::labelSchema());
         foreach ($values as $key => $value) {
-            if (!is_scalar($value) && $value !== null) { throw new InvalidArgumentException((string) __t('account.validation.invalid', ['field' => static::labelSchema()[$key]])); }
+            if (!is_scalar($value) && $value !== null) { throw new InvalidArgumentException((string) __t('contacts.field_invalid', ['field' => static::labelSchema()[$key]])); }
         }
         foreach (['active', 'is_customer', 'is_supplier'] as $flag) {
             if (array_key_exists($flag, $values) && !in_array($values[$flag], ['true', 'false'], true)) {
@@ -144,7 +144,7 @@ class ContactResource extends Resource
         }
         foreach (static::requiredKeys() as $key) {
             if (trim((string) ($values[$key] ?? '')) === '') {
-                throw new InvalidArgumentException((string) __t('account.validation.required', ['field' => static::labelSchema()[$key]]));
+                throw new InvalidArgumentException((string) __t('contacts.field_required', ['field' => static::labelSchema()[$key]]));
             }
         }
         $country = (string) ($values['country'] ?? '');
