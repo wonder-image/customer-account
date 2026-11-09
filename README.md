@@ -88,7 +88,7 @@ Una persona (`contacts`) e un'azienda (`companies`) sono schede distinte. Non c'
 
 ## Referenti delle aziende
 
-Un'azienda può avere più referenti, e una persona può stare in più aziende. Il legame è la tabella `contact_relations` (`Models\ContactRelation`): `company_id` (→ `companies`), `person_id` (→ `contacts`), `job_title`, `is_primary`, `receives_documents`, `access`, `position`, `deleted`. Ogni coppia azienda/persona compare una volta sola, anche fra le righe cancellate: chi la ricollega riprende la riga di prima.
+Un'azienda può avere più referenti, e una persona può stare in più aziende. Il legame è la tabella `contact_relations` (`Models\ContactRelation`): `company_id` (→ `companies`), `person_id` (→ `contacts`), `job_title`, `department`, `is_primary`, `receives_documents`, `access`, `position`, `deleted`. Ogni coppia azienda/persona compare una volta sola, anche fra le righe cancellate: chi la ricollega riprende la riga di prima.
 
 `access` dice cosa può fare la persona per l'azienda, per esempio dall'account sul negozio:
 
@@ -106,6 +106,25 @@ I referenti sono sempre attivi: non c'è un interruttore. `ContactRelations::ena
 - `Support\ContactRelations::peopleOf($companyId)` dà le righe vive con la persona sotto `contact`; `companiesOf($personId, $access = null)` con l'azienda sotto `company`, filtrabili per accesso (`['buyer', 'admin']`). `accessOf($personId, $companyId)` dà l'accesso, `none` se non sono legate.
 - Una Resource sulla tabella delle persone o delle aziende prende il repeater con il trait `Resources\Concerns\HasContactRelations` (`...static::contactRelationFields()` nel `formSchema()`). Il gancio `relationPersonPayload(array $values)` ritocca i valori della persona creata al volo.
 - `Support\ContactRelations::sync($parentColumn, $parentId, $rows)` è l'unico punto che scrive i legami: i repeater, un'API, un import o una sync ci passano. Le righe assenti si cancellano (soft delete).
+
+## Reparto dei referenti
+
+`contact_relations.department` dice a quale reparto appartiene il referente, per scegliere a chi mandare email, fatture o newsletter. È una lista fissa (`ContactRelation::DEPARTMENTS`): `administration`, `purchasing`, `sales`, `technical`, `management`, `other`; vuoto = nessun reparto. Le etichette sono in `contacts.department_*`.
+
+- `ContactRelations::departments()` dà le scelte per un select; `addDepartment($key, $label)` ne aggiunge una (un modulo al boot, un sito in `custom/function`).
+- `department($value)` normalizza (un valore sconosciuto diventa vuoto), `departmentLabel($value)` dà l'etichetta.
+- `peopleByDepartment($companyId, 'administration')` (o una lista) dà i referenti vivi di quei reparti con la persona sotto `contact`: è il punto da cui partono gli invii per reparto.
+- Una riga senza `department` tiene quello che aveva, come `access`.
+
+## Brand delle aziende
+
+Il brand è il nome commerciale: un brand può stare su più ragioni sociali e una ragione sociale può avere più brand. Tabelle `company_brands` (`Models\CompanyBrand`: `name`, `deleted`) e `company_brand_links` (`Models\CompanyBrandLink`: `company_id`, `brand_id`, `position`).
+
+- `Support\CompanyBrands` è l'unico punto che crea brand e scrive i legami: `options()`, `find()`, `of($companyId)`, `idsOf()`, `companiesOf($brandId)`, `belongsTo($brandId, $companyId)`, `findOrCreate($name)` (stesso nome, maiuscole e spazi a parte, = stesso brand), `byName()`, `sync($companyId, $brandIds)`.
+- Eventi (`CompanyEvents`): `company.brand_created`, `company.brand_linked`, `company.brand_unlinked`.
+- `Resources\CompanyBrandResource` (`/backend/company-brands/`, admin) implementa `QuickCreateStore` di `wonder-image/app`: la creazione rapida riusa il brand con lo stesso nome invece di farne un doppione.
+- Il trait `Resources\Concerns\HasCompanyBrands` dà a una Resource delle aziende il campo `brands` (ricerca multipla con «+» per crearne uno) e il marker `company_brands_form`: i brand si salvano solo se il form li ha mostrati. `brandResource()` dice quale Resource crea il brand (un modulo può ripubblicarla con altri permessi), `withBrandValues()` precompila il form. `CompanyResource` lo usa con il campo per primo.
+- `CompanyRecord::from()` porta `brands` (`id`, `name`) per export e sync.
 
 ## Aziende separate dai contatti
 
@@ -156,7 +175,7 @@ Un ascoltatore riceve `($evento, $payload)`. Se lancia un'eccezione, l'errore fi
 
 **Forma stabile della scheda** (`Support\ContactRecord` per le persone, `Support\CompanyRecord` per le aziende, base comune `Support\PartyRecord`):
 
-- `from($rowOrId)` dà un array serializzabile con `schema` (oggi `2`), `entity` (`contact` o `company`), `id`, `code`, i campi (`ContactExport::PERSON_FIELDS` più `birth_date` per la persona, `ContactExport::COMPANY_FIELDS` per l'azienda), `is_customer`, `active`, `relations` (legami vivi: id dell'altro lato, `job_title`, `is_primary`, `receives_documents`, `access`) ed `external_ids` (righe di `external_references` con `entity_type` uguale a `entity`: `provider`, `environment`, `object_type`, `external_id`, `synced_at`). La persona aggiunge `user_id` e `consents` (stato corrente dei consensi dell'utente collegato, dal registro del core); l'azienda `is_supplier`. È la base per un export o un payload verso un CRM.
+- `from($rowOrId)` dà un array serializzabile con `schema` (oggi `2`), `entity` (`contact` o `company`), `id`, `code`, i campi (`ContactExport::PERSON_FIELDS` più `birth_date` per la persona, `ContactExport::COMPANY_FIELDS` per l'azienda), `is_customer`, `active`, `relations` (legami vivi: id dell'altro lato, `job_title`, `department`, `is_primary`, `receives_documents`, `access`) ed `external_ids` (righe di `external_references` con `entity_type` uguale a `entity`: `provider`, `environment`, `object_type`, `external_id`, `synced_at`). La persona aggiunge `user_id` e `consents` (stato corrente dei consensi dell'utente collegato, dal registro del core); l'azienda `is_supplier` e `brands`. È la base per un export o un payload verso un CRM.
 - `fromArray($input)` porta un record in ingresso agli stessi campi, ripuliti; le chiavi assenti restano assenti, così un import parziale non svuota la scheda.
 - `validate($record)` dà gli errori (campo → `required` / `invalid`) con le regole di base: nome o cognome per la persona, ragione sociale per l'azienda, formato di email e PEC, legami e id esterni completi.
 

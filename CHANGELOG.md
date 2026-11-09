@@ -10,6 +10,8 @@
 
 ### Added
 
+- Brand delle aziende (nomi commerciali, N:N con le ragioni sociali): tabelle `company_brands` e `company_brand_links`, `Support\CompanyBrands`, `CompanyBrandResource` (con `QuickCreateStore`: niente doppioni per nome), trait `HasCompanyBrands` (campo `brands` cercabile con «+», primo nel form delle aziende), eventi `company.brand_created` / `brand_linked` / `brand_unlinked`, `brands` in `CompanyRecord`.
+- Reparto dei referenti: `contact_relations.department` (lista fissa `ContactRelation::DEPARTMENTS`, estendibile con `ContactRelations::addDepartment()`), colonna «Reparto» nei repeater, `departments()`, `departmentLabel()`, `peopleByDepartment()` per gli invii per reparto; `department` in `relations` dei record.
 - `CompanySplitMigration`: al `forge update` sposta le aziende senza account in `companies` (scheda vecchia nel cestino), lega a una nuova azienda con accesso `admin` le aziende con account, crea un'azienda fornitore per i privati fornitori, lascia come contatti le aziende senza ragione sociale. Scrive `contact_company_map` per i moduli dipendenti. L'azienda tiene il codice del contatto con prefisso `cmp_` (`CompanySplitMigration::codeFromContact()`). Idempotente.
 - Comando `php forge customer-account:companies`: cosa farà la migrazione, senza scrivere.
 - `contact_relations.access` (`none`, `buyer`, `admin`), colonna «Accesso» nei repeater, `ContactRelations::accessOf()` e filtro `companiesOf($personId, $access)`.

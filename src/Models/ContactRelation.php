@@ -25,6 +25,9 @@ class ContactRelation extends Model
     public const ACCESS_ADMIN = 'admin';
     public const ACCESS = [self::ACCESS_NONE, self::ACCESS_BUYER, self::ACCESS_ADMIN];
 
+    /** I reparti di base del referente; altri si aggiungono con `ContactRelations::addDepartment()`. */
+    public const DEPARTMENTS = ['administration', 'purchasing', 'sales', 'technical', 'management', 'other'];
+
     public static string $table = 'contact_relations';
     public static string $folder = 'contacts';
     public static string $icon = 'bi bi-diagram-2';
@@ -40,6 +43,8 @@ class ContactRelation extends Model
             Column::key('company_id')->int()->null(false)->foreign(Company::$table),
             Column::key('person_id')->int()->null(false)->foreign(Contact::$table),
             Column::key('job_title')->length(150),
+            // Testo e non enum: i reparti si estendono senza toccare la tabella.
+            Column::key('department')->length(40),
             Column::key('is_primary')->enum(['true', 'false'])->default('false'),
             Column::key('receives_documents')->enum(['true', 'false'])->default('false'),
             Column::key('access')->enum(self::ACCESS)->default(self::ACCESS_NONE),
@@ -52,6 +57,7 @@ class ContactRelation extends Model
         return [
             'uq_company_person' => ['unique' => ['company_id', 'person_id']],
             'ind_person' => ['index' => 'person_id'],
+            'ind_department' => ['index' => ['company_id', 'department']],
         ];
     }
 
@@ -61,6 +67,7 @@ class ContactRelation extends Model
             Field::key('company_id')->number()->decimals(0),
             Field::key('person_id')->number()->decimals(0),
             Field::key('job_title')->text(),
+            Field::key('department')->text()->sanitize(false),
             Field::key('is_primary')->text()->sanitize(false),
             Field::key('receives_documents')->text()->sanitize(false),
             Field::key('access')->text()->sanitize(false),
