@@ -371,6 +371,13 @@ final class ContactRelations
         ));
     }
 
+    /** La persona è un referente vivo dell'azienda? */
+    public static function isLinked(int $personId, int $companyId): bool
+    {
+        return $personId > 0 && $companyId > 0
+            && self::rows(ContactRelation::find([self::PERSON => $personId, self::COMPANY => $companyId, 'deleted' => 'false'], 1)) !== [];
+    }
+
     /** L'accesso di una persona a un'azienda: `none` se non sono legate. */
     public static function accessOf(int $personId, int $companyId): string
     {

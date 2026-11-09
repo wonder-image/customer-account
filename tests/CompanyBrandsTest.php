@@ -303,15 +303,108 @@ check('Commissioner: brand, poi ragione sociale, poi persona', function () use (
         && Commissioner::label(0, 0, 0) === '';
 });
 
-check('CompanyRecord: i brand legati con codice, slug, ruolo e predefinito', function () use ($seed) {
-    Query::reset($seed());
+check('CompanyRecord: i brand legati con codice, slug, ruolo, predefinito e brand principale; la capogruppo', function () use ($seed) {
+    $tables = $seed();
+    $tables['company_brands'][2]['parent_id'] = 1;
+    $tables['companies'][1]['parent_id'] = 2;
+    $tables['companies'][2]['code'] = 'cmp_royal';
+    Query::reset($tables);
     CompanyBrands::sync(1, [['brand_id' => 2, 'role' => 'licensee'], ['brand_id' => 1, 'is_default' => 'true']]);
     $record = CompanyRecord::from(1);
+    $parent = CompanyRecord::from(2);
 
     return $record['schema'] === 3 && $record['brands'] === [
-        ['id' => 2, 'code' => 'cbr_la-piana', 'slug' => 'la-piana', 'name' => 'La Piana', 'role' => 'licensee', 'is_default' => false],
-        ['id' => 1, 'code' => 'cbr_rclass', 'slug' => 'rclass', 'name' => 'RClass', 'role' => 'owner', 'is_default' => true],
-    ] && json_encode($record) !== false;
+        ['id' => 2, 'code' => 'cbr_la-piana', 'slug' => 'la-piana', 'name' => 'La Piana', 'role' => 'licensee', 'is_default' => false, 'parent_id' => 1, 'parent_code' => 'cbr_rclass'],
+        ['id' => 1, 'code' => 'cbr_rclass', 'slug' => 'rclass', 'name' => 'RClass', 'role' => 'owner', 'is_default' => true, 'parent_id' => 0, 'parent_code' => ''],
+    ] && $record['parent_id'] === 2 && $record['parent_code'] === 'cmp_royal'
+        && $parent['parent_id'] === 0 && $parent['parent_code'] === '' && json_encode($record) !== false;
+});
+
+check('linee: un livello solo, ogni rifiuto, familyIds, fullLabel e options', function () use ($seed, $brand) {
+    $tables = $seed();
+    $tables['company_brands'][4] = $brand(4, 'Chiuso', 'chiuso', 'chiuso', ['archived' => 'true']);
+    $tables['company_brands'][5] = $brand(5, 'Piana Mare', 'piana-mare', 'pianamare');
+    Query::reset($tables);
+    $ok = CompanyBrands::setParent(5, 2);
+    $problems = [
+        CompanyBrands::parentProblem(1, 1),   // sé stesso
+        CompanyBrands::parentProblem(1, 99),  // non esiste
+        CompanyBrands::parentProblem(1, 3),   // cancellato
+        CompanyBrands::parentProblem(1, 4),   // archiviato
+        CompanyBrands::parentProblem(1, 5),   // il padre è una linea
+        CompanyBrands::parentProblem(2, 1),   // ha già linee
+        CompanyBrands::parentProblem(0, 2),   // brand nuovo sotto un padre: va bene
+        CompanyBrands::parentProblem(5, 0),   // togliere il padre: va bene
+    ];
+    $refused = !CompanyBrands::setParent(2, 1) && !CompanyBrands::setParent(99, 1) && (int) (Query::$tables['company_brands'][2]['parent_id'] ?? 0) === 0;
+    $options = CompanyBrands::options();
+    CompanyBrands::archive(2);
+    $kept = (int) Query::$tables['company_brands'][5]['parent_id'];
+
+    return $ok && $refused && $problems === ['self', 'missing', 'missing', 'archived', 'nested', 'has_children', '', '']
+        && CompanyBrands::familyIds(2) === [2, 5] && CompanyBrands::familyIds(5) === [5] && CompanyBrands::familyIds(99) === []
+        && (int) CompanyBrands::parentOf(5)['id'] === 2 && CompanyBrands::parentOf(2) === null
+        && array_column(CompanyBrands::childrenOf(2), 'id') === [5]
+        && CompanyBrands::fullLabel(Query::$tables['company_brands'][5]) === 'La Piana › Piana Mare'
+        && CompanyBrands::fullLabel(Query::$tables['company_brands'][1]) === 'RClass'
+        && $options[5] === 'La Piana › Piana Mare' && array_keys($options) === [2, 5, 1]
+        && $kept === 2 && !isset(CompanyBrands::parentOptions()[2]) && !isset(CompanyBrands::parentOptions()[5]);
+});
+
+check('form del brand: il brand principale si valida lato server', function () use ($seed, $brand) {
+    $tables = $seed();
+    $tables['company_brands'][5] = $brand(5, 'Piana Mare', 'piana-mare', 'pianamare', ['parent_id' => 2]);
+    Query::reset($tables);
+    $ok = CompanyBrandResource::mutateRequestValues(['name' => 'RClass', 'parent_id' => '2'], 'update', 'backend', ['id' => 1, 'name' => 'RClass']);
+    $none = CompanyBrandResource::mutateRequestValues(['name' => 'RClass', 'parent_id' => ''], 'update', 'backend', ['id' => 1, 'name' => 'RClass']);
+    $errors = [];
+
+    foreach ([['1', 1], ['5', 1], ['1', 2], ['3', 1], ['x', 1], ['-2', 1]] as [$parent, $id]) {
+        try {
+            CompanyBrandResource::mutateRequestValues(['name' => Query::$tables['company_brands'][$id]['name'], 'parent_id' => $parent], 'update', 'backend', ['id' => $id, 'name' => Query::$tables['company_brands'][$id]['name']]);
+            $errors[] = 'ok';
+        } catch (InvalidArgumentException $e) {
+            $errors[] = $e->getMessage();
+        }
+    }
+
+    return $ok['parent_id'] === 2 && $none['parent_id'] === 0
+        && $errors === ['contacts.brand_parent_self', 'contacts.brand_parent_nested', 'contacts.brand_parent_has_children', 'contacts.brand_parent_missing', 'contacts.brand_parent_missing', 'contacts.brand_parent_missing'];
+});
+
+check('merge con linee: le linee passano all\'arrivo, o al suo padre; mai due livelli', function () use ($seed, $brand) {
+    $tables = $seed();
+    $tables['company_brands'][4] = $brand(4, 'Linea A', 'linea-a', 'lineaa', ['parent_id' => 1]);
+    $tables['company_brands'][5] = $brand(5, 'Linea B', 'linea-b', 'lineab', ['parent_id' => 1]);
+    $tables['company_brands'][6] = $brand(6, 'Altro', 'altro', 'altro');
+    $tables['company_brands'][7] = $brand(7, 'Linea C', 'linea-c', 'lineac', ['parent_id' => 6]);
+    Query::reset($tables);
+    $parent = static fn (int $id): int => (int) (Query::$tables['company_brands'][$id]['parent_id'] ?? 0);
+
+    CompanyBrands::merge(1, 2);       // padre in un brand semplice: le linee vanno sotto l'arrivo
+    $plain = [$parent(4), $parent(5), $parent(2)];
+    CompanyBrands::merge(2, 7);       // l'arrivo è una linea: le linee vanno sotto il suo padre
+    $nested = [$parent(4), $parent(5), $parent(7)];
+    CompanyBrands::merge(6, 4);       // l'arrivo era una linea della partenza: resta senza padre
+    $own = [$parent(4), $parent(5), $parent(7)];
+
+    return $plain === [2, 2, 0] && $nested === [6, 6, 6] && $own === [0, 4, 4];
+});
+
+check('Commissioner::resolve: privato, azienda senza brand, brand non suo, persona non referente, niente', function () use ($seed, $link) {
+    $tables = $seed();
+    $tables['contacts'][6] = ['id' => 6, 'name' => 'Luca', 'surname' => 'Verdi', 'deleted' => 'false'];
+    $tables['company_brand_links'][1] = $link(1, 1, 2);
+    $tables['contact_relations'][1] = ['id' => 1, 'company_id' => 1, 'person_id' => 5, 'position' => 0, 'deleted' => 'false'];
+    Query::reset($tables);
+
+    return Commissioner::resolve(2, 0, 6) === ['brand_id' => 0, 'company_id' => 0, 'person_id' => 6, 'label' => 'Luca Verdi']
+        && Commissioner::resolve(0, 2, 0) === ['brand_id' => 0, 'company_id' => 2, 'person_id' => 0, 'label' => 'Royal Immobili srl']
+        && Commissioner::resolve(2, 1, 5) === ['brand_id' => 2, 'company_id' => 1, 'person_id' => 5, 'label' => 'La Piana']
+        && Commissioner::resolve(1, 1, 5)['brand_id'] === 0
+        && Commissioner::resolve(2, 1, 6) === ['brand_id' => 2, 'company_id' => 1, 'person_id' => 0, 'label' => 'La Piana']
+        && Commissioner::resolve(2, 9, 99) === null && Commissioner::resolve(0, 0, 0) === null
+        && Commissioner::resolve(2, 9, 6) === ['brand_id' => 0, 'company_id' => 0, 'person_id' => 6, 'label' => 'Luca Verdi'];
 });
 
 check('findOrCreate: se l\'insert fallisce (un altro «+» con lo stesso nome) riprende il brand appena nato', function () use ($seed, $brand, $events) {

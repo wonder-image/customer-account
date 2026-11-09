@@ -20,10 +20,13 @@ use Wonder\Plugin\CustomerAccount\Support\CompanyBrands;
  * `CompanyBrands::sync()`, solo se il form l'ha mostrato (campo
  * `company_brands_form`), così un repeater vuoto stacca tutto.
  * La classe deve usare anche `HasContactRelations` o estendere una Resource
- * che li ha.
+ * che li ha. Porta con sé `HasCompanyGroup`: la capogruppo postata si
+ * valida sempre, anche dove il form non mostra il campo.
  */
 trait HasCompanyBrands
 {
+    use HasCompanyGroup;
+
     public static string $brandsInput = 'brands';
     public static string $brandsMarker = 'company_brands_form';
 

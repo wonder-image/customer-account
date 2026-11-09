@@ -40,7 +40,7 @@ final class CompanyBrands
     {
         $out = [];
         $archived = [];
-        $all = RequestMemo::remember(CompanyBrand::$table, 'options', static fn (): array => self::rows(self::safe(static fn () => CompanyBrand::find(['deleted' => 'false']))));
+        $all = self::allById();
 
         foreach ($all as $row) {
             if (self::archived($row)) {
@@ -48,7 +48,7 @@ final class CompanyBrands
                 continue;
             }
 
-            $out[(int) $row['id']] = self::label($row);
+            $out[(int) $row['id']] = self::fullLabelFrom($row, $all);
         }
 
         if ($archived !== []) {
@@ -64,7 +64,7 @@ final class CompanyBrands
                 $row = $archived[(int) $link['brand_id']] ?? null;
 
                 if ($row !== null) {
-                    $out[(int) $row['id']] = self::label($row).' '.__t('contacts.brand_archived_suffix');
+                    $out[(int) $row['id']] = self::fullLabelFrom($row, $all).' '.__t('contacts.brand_archived_suffix');
                 }
             }
         }
@@ -72,6 +72,108 @@ final class CompanyBrands
         asort($out, SORT_NATURAL | SORT_FLAG_CASE);
 
         return $out;
+    }
+
+    /**
+     * Le scelte del «Brand principale»: i brand senza padre e non archiviati.
+     * Il brand stesso c'è (il form non sa quale mostra): lo scarta `parentProblem()`.
+     *
+     * @return array<int, string>
+     */
+    public static function parentOptions(): array
+    {
+        $out = [];
+
+        foreach (self::allById() as $id => $row) {
+            if (!self::archived($row) && self::parentId($row) === 0) {
+                $out[$id] = self::label($row);
+            }
+        }
+
+        asort($out, SORT_NATURAL | SORT_FLAG_CASE);
+
+        return $out;
+    }
+
+    /**
+     * Il nome con la linea: «Padre › Figlio», o il nome se non ha padre.
+     * Testo, come `label()`: chi lo stampa lo escapa.
+     */
+    public static function fullLabel(array $row): string
+    {
+        $parent = self::parentId($row) > 0 ? self::find(self::parentId($row)) : null;
+
+        return $parent !== null ? self::label($parent).' › '.self::label($row) : self::label($row);
+    }
+
+    /** Il brand padre (la linea appartiene a lui), o null. */
+    public static function parentOf(int $brandId): ?array
+    {
+        $brand = self::find($brandId);
+
+        return $brand !== null && self::parentId($brand) > 0 ? self::find(self::parentId($brand)) : null;
+    }
+
+    /**
+     * Le linee di un brand, archiviate comprese (i documenti le usano ancora).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public static function childrenOf(int $brandId): array
+    {
+        return $brandId > 0 ? self::rows(self::safe(static fn () => CompanyBrand::find(['parent_id' => $brandId], null, 'name', 'ASC'))) : [];
+    }
+
+    /**
+     * Il brand e le sue linee: per chi somma i totali del padre. Vuota se il brand non c'è.
+     *
+     * @return list<int>
+     */
+    public static function familyIds(int $brandId): array
+    {
+        if (self::find($brandId) === null) {
+            return [];
+        }
+
+        return [$brandId, ...array_map(static fn (array $row): int => (int) $row['id'], self::childrenOf($brandId))];
+    }
+
+    /**
+     * Perché `$parentId` non può essere il padre di `$brandId`: vuoto se può.
+     * Un livello solo: il padre esiste, non è archiviato, non è il brand
+     * stesso e non ha a sua volta un padre; il brand che diventa figlio non
+     * ha linee. `$brandId` 0 è un brand nuovo; `$parentId` 0 toglie il padre.
+     *
+     * @return ''|'missing'|'archived'|'self'|'nested'|'has_children'
+     */
+    public static function parentProblem(int $brandId, int $parentId): string
+    {
+        if ($parentId === 0) {
+            return '';
+        }
+
+        $parent = self::find($parentId);
+
+        return match (true) {
+            $parentId === $brandId => 'self',
+            $parent === null => 'missing',
+            self::archived($parent) => 'archived',
+            self::parentId($parent) > 0 => 'nested',
+            $brandId > 0 && self::childrenOf($brandId) !== [] => 'has_children',
+            default => '',
+        };
+    }
+
+    /** Fa di un brand una linea di un altro (0 toglie il padre), se le regole lo permettono. */
+    public static function setParent(int $brandId, int $parentId): bool
+    {
+        if (self::find($brandId) === null || self::parentProblem($brandId, $parentId) !== '') {
+            return false;
+        }
+
+        $result = CompanyBrand::query()->Update(CompanyBrand::$table, ['parent_id' => $parentId], 'id', $brandId);
+
+        return (bool) ($result->success ?? false);
     }
 
     /**
@@ -605,6 +707,9 @@ final class CompanyBrands
      * Se un'azienda ha già il brand di arrivo, tiene quel legame (riaperto se
      * serve, predefinito se lo era l'altro) e chiude l'altro. Emette
      * `BRAND_MERGED`: i moduli dipendenti rimappano lì i loro riferimenti.
+     * Le linee del brand di partenza passano al brand di arrivo, o al suo
+     * padre se è una linea; se il padre era proprio il brand di partenza, il
+     * brand di arrivo perde il padre. Mai due livelli.
      * Rilanciarla dopo un'interruzione finisce il lavoro.
      *
      * Non controlla permessi: chi la espone (una pagina, un comando) li controlla.
@@ -652,6 +757,7 @@ final class CompanyBrands
                 CompanyBrandLink::query()->Update(CompanyBrandLink::$table, ['ended_at' => $now, 'is_default' => 'false'], 'id', (int) $link['id']);
             }
 
+            self::moveChildren($fromId, $intoId);
             ContactRelations::moveBrand($fromId, $intoId);
             self::archive($fromId);
         });
@@ -660,6 +766,58 @@ final class CompanyBrands
         CompanyEvents::dispatch(CompanyEvents::BRAND_MERGED, ['from_id' => $fromId, 'into_id' => $intoId, 'brand' => self::find($intoId) ?? $into]);
 
         return true;
+    }
+
+    /** Le linee di `$fromId` passano sotto `$intoId` o sotto il suo padre (vedi `merge()`). */
+    private static function moveChildren(int $fromId, int $intoId): void
+    {
+        $into = self::find($intoId) ?? [];
+        $target = self::parentId($into);
+
+        if ($target === $fromId) {
+            CompanyBrand::query()->Update(CompanyBrand::$table, ['parent_id' => 0], 'id', $intoId);
+            $target = 0;
+        }
+
+        $target = $target > 0 ? $target : $intoId;
+
+        foreach (self::childrenOf($fromId) as $child) {
+            if ((int) $child['id'] !== $intoId) {
+                CompanyBrand::query()->Update(CompanyBrand::$table, ['parent_id' => $target], 'id', (int) $child['id']);
+            }
+        }
+    }
+
+    /**
+     * Tutti i brand non cancellati per id, letti una volta per richiesta: una
+     * scrittura sulla tabella svuota il memo.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private static function allById(): array
+    {
+        return RequestMemo::remember(CompanyBrand::$table, 'options', static function (): array {
+            $out = [];
+
+            foreach (self::rows(self::safe(static fn () => CompanyBrand::find(['deleted' => 'false']))) as $row) {
+                $out[(int) $row['id']] = $row;
+            }
+
+            return $out;
+        });
+    }
+
+    /** @param array<int, array<string, mixed>> $byId */
+    private static function fullLabelFrom(array $row, array $byId): string
+    {
+        $parent = $byId[self::parentId($row)] ?? null;
+
+        return $parent !== null ? self::label($parent).' › '.self::label($row) : self::label($row);
+    }
+
+    private static function parentId(array $row): int
+    {
+        return (int) ($row['parent_id'] ?? 0);
     }
 
     /**

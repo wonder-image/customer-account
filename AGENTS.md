@@ -38,6 +38,12 @@ Le convenzioni del framework sono in `vendor/wonder-image/app/AGENTS.md`.
   archivia, non si cancella. Ruoli in `CompanyBrandLink::ROLES` (testo,
   estendibili con `CompanyBrands::addRole()`). Tenuto separato dai marchi dei
   prodotti del gestionale (`gst_brands`).
+- Livelli: brand → linea (`company_brands.parent_id`) e azienda → capogruppo
+  (`companies.parent_id`), sempre un livello solo. Le regole stanno in un punto:
+  `CompanyBrands::parentProblem()` e `CompanyGroups::problem()`; ogni
+  `parent_id` postato passa da lì (`HasCompanyGroup`, che `HasCompanyBrands`
+  porta, e `CompanyBrandResource`). Il committente di un progetto si salva con
+  `Commissioner::resolve()`.
 - Integrazioni: `ContactRecord` / `CompanyRecord` (base `PartyRecord`,
   `SCHEMA` 2, `CompanyRecord` 3, `entity_type` `contact` / `company`). Se
   cambia la forma, alzare `SCHEMA` della classe che cambia.

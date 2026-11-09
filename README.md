@@ -133,8 +133,22 @@ Tabelle `company_brands` (`Models\CompanyBrand`: `code`, `name`, `slug`, `name_k
 - Eventi (`CompanyEvents`): `company.brand_created`, `company.brand_linked` e `company.brand_unlinked` (con `role`), `company.brand_merged` (`from_id`, `into_id`, `brand`: i moduli dipendenti rimappano lì i loro riferimenti).
 - `Resources\CompanyBrandResource` (`/backend/company-brands/`, admin) implementa `QuickCreateStore` di `wonder-image/app`: la creazione rapida riusa il brand con lo stesso nome invece di farne un doppione.
 - Il trait `Resources\Concerns\HasCompanyBrands` dà a una Resource delle aziende il repeater `brands` (brand cercabile con «+», ruolo, predefinito) e il marker `company_brands_form`: i brand si salvano solo se il form li ha mostrati. `brandResource()` dice quale Resource crea il brand (un modulo può ripubblicarla con altri permessi), `withBrandValues()` precompila il form. `CompanyResource` lo usa con il campo per primo.
-- `Support\Commissioner::label($brandId, $companyId, $personId)` dà il nome con cui chiamare chi commissiona: brand, altrimenti ragione sociale, altrimenti persona (testo da escapare).
-- `CompanyRecord::from()` porta `brands` (`id`, `code`, `slug`, `name`, `role`, `is_default`) per export e sync.
+- **Linee** (un livello solo): `company_brands.parent_id` fa di un brand la linea di un altro («La Piana» › «Piana Mare»). Le regole sono in `CompanyBrands::parentProblem($brandId, $parentId)` (il padre esiste, non è archiviato, non è il brand stesso, non ha un padre; un brand con linee non diventa linea) e valgono per `setParent()` e per il campo «Brand principale» del form. Letture: `parentOf()`, `childrenOf()` (archiviate comprese), `familyIds($brandId)` (il brand e le sue linee, per chi somma i totali del padre), `fullLabel($row)` («Padre › Figlio», testo da escapare), che `options()` usa nelle tendine. Archiviare un padre non tocca le linee. In `merge()` le linee del brand di partenza passano al brand di arrivo, o al suo padre se è una linea; se il padre era proprio il brand di partenza, l'arrivo resta senza padre.
+- `CompanyRecord::from()` porta `brands` (`id`, `code`, `slug`, `name`, `role`, `is_default`, `parent_id`, `parent_code`) per export e sync.
+
+## Gruppi di aziende
+
+`companies.parent_id` è la capogruppo (0 = nessuna), a un livello solo. `Support\CompanyGroups` tiene le regole e le letture: `problem($companyId, $parentId)` (la capogruppo esiste e non è cancellata, non è l'azienda stessa, non ha una capogruppo; un'azienda con controllate non diventa controllata), `setParent()`, `parentOf()`, `childrenOf()`, `groupIds($companyId)` (capogruppo e controllate, da qualunque azienda del gruppo), `options()` per il select.
+
+- Il campo «Capogruppo» (`parent_id`) viene da `HasCompanyGroup::groupFields()`; `CompanyResource` lo mette dopo i brand. `HasCompanyBrands` usa `HasCompanyGroup`, che in `mutateRequestValues()` valida ogni `parent_id` postato, anche dove il form non lo mostra.
+- L'export (`ContactExport::COMPANY_FIELDS`) non la porta: le colonne sono testi della scheda, non id.
+- `CompanyRecord::from()` porta `parent_id` e `parent_code` (0 e stringa vuota se non c'è).
+
+## Committente
+
+Chi commissiona un lavoro è un'azienda o una persona, con il brand con cui l'azienda si presenta. Il nome con cui chiamarlo è il brand, altrimenti la ragione sociale, altrimenti il nome della persona: `Support\Commissioner::label($brandId, $companyId, $personId)` (testo da escapare).
+
+`Commissioner::resolve($brandId, $companyId, $personId)` dà la forma da salvare: `['brand_id', 'company_id', 'person_id', 'label']`, o `null` se non esistono né l'azienda né la persona. Il brand resta solo se è legato oggi all'azienda (un privato non ha brand); la persona, se c'è un'azienda, solo se ne è un referente. Su un progetto o un documento si salvano i tre id e il nome copiato, così il nome resta quello del momento anche se poi il brand cambia.
 
 ## Aziende separate dai contatti
 
@@ -185,7 +199,7 @@ Un ascoltatore riceve `($evento, $payload)`. Se lancia un'eccezione, l'errore fi
 
 **Forma stabile della scheda** (`Support\ContactRecord` per le persone, `Support\CompanyRecord` per le aziende, base comune `Support\PartyRecord`):
 
-- `from($rowOrId)` dà un array serializzabile con `schema` (oggi `2` per le persone, `3` per le aziende), `entity` (`contact` o `company`), `id`, `code`, i campi (`ContactExport::PERSON_FIELDS` più `birth_date` per la persona, `ContactExport::COMPANY_FIELDS` per l'azienda), `is_customer`, `active`, `relations` (legami vivi: id dell'altro lato, `job_title`, `department`, `is_primary`, `receives_documents`, `access`) ed `external_ids` (righe di `external_references` con `entity_type` uguale a `entity`: `provider`, `environment`, `object_type`, `external_id`, `synced_at`). La persona aggiunge `user_id` e `consents` (stato corrente dei consensi dell'utente collegato, dal registro del core); l'azienda `is_supplier` e `brands`. È la base per un export o un payload verso un CRM.
+- `from($rowOrId)` dà un array serializzabile con `schema` (oggi `2` per le persone, `3` per le aziende), `entity` (`contact` o `company`), `id`, `code`, i campi (`ContactExport::PERSON_FIELDS` più `birth_date` per la persona, `ContactExport::COMPANY_FIELDS` per l'azienda), `is_customer`, `active`, `relations` (legami vivi: id dell'altro lato, `job_title`, `department`, `is_primary`, `receives_documents`, `access`) ed `external_ids` (righe di `external_references` con `entity_type` uguale a `entity`: `provider`, `environment`, `object_type`, `external_id`, `synced_at`). La persona aggiunge `user_id` e `consents` (stato corrente dei consensi dell'utente collegato, dal registro del core); l'azienda `is_supplier`, `parent_id`, `parent_code` e `brands`. È la base per un export o un payload verso un CRM.
 - `fromArray($input)` porta un record in ingresso agli stessi campi, ripuliti; le chiavi assenti restano assenti, così un import parziale non svuota la scheda.
 - `validate($record)` dà gli errori (campo → `required` / `invalid`) con le regole di base: nome o cognome per la persona, ragione sociale per l'azienda, formato di email e PEC, legami e id esterni completi.
 

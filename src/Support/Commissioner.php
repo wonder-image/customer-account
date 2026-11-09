@@ -8,9 +8,10 @@ use Wonder\Plugin\CustomerAccount\Models\Contact;
 use Wonder\Plugin\CustomerAccount\Resources\ContactResource;
 
 /**
- * Il nome con cui chiamare chi commissiona un lavoro (progetti, testi
- * scritti dall'AI): il brand, altrimenti la ragione sociale, altrimenti il
- * nome della persona.
+ * Il committente di un lavoro (progetti, documenti, testi scritti dall'AI):
+ * un'azienda o una persona, con il brand con cui l'azienda si presenta e il
+ * referente che lo segue. Il nome con cui chiamarlo è il brand, altrimenti
+ * la ragione sociale, altrimenti il nome della persona.
  */
 final class Commissioner
 {
@@ -39,6 +40,37 @@ final class Commissioner
         }
 
         return '';
+    }
+
+    /**
+     * La forma da salvare su un progetto o un documento: i tre id ripuliti e
+     * il nome copiato. Il brand resta solo se è legato oggi all'azienda (un
+     * privato non ha brand); la persona, se c'è un'azienda, solo se ne è un
+     * referente. `null` se non esistono né l'azienda né la persona.
+     *
+     * @return array{brand_id: int, company_id: int, person_id: int, label: string}|null
+     */
+    public static function resolve(int $brandId, int $companyId, int $personId): ?array
+    {
+        $companyId = self::row(Company::class, $companyId) !== null ? $companyId : 0;
+        $personId = self::row(Contact::class, $personId) !== null ? $personId : 0;
+
+        if ($companyId > 0 && $personId > 0 && !ContactRelations::isLinked($personId, $companyId)) {
+            $personId = 0;
+        }
+
+        if ($companyId === 0 && $personId === 0) {
+            return null;
+        }
+
+        $brandId = $companyId > 0 && CompanyBrands::belongsTo($brandId, $companyId) ? $brandId : 0;
+
+        return [
+            'brand_id' => $brandId,
+            'company_id' => $companyId,
+            'person_id' => $personId,
+            'label' => self::label($brandId, $companyId, $personId),
+        ];
     }
 
     /** @param class-string<\Wonder\App\Model> $model */

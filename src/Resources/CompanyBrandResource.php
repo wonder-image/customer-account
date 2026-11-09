@@ -36,6 +36,7 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
             'name' => (string) __t('contacts.brand_name'),
             'note' => (string) __t('contacts.note'),
             'archived' => (string) __t('contacts.brand_archived'),
+            'parent_id' => (string) __t('contacts.brand_parent'),
         ];
     }
     public static function formSchema(): array
@@ -44,6 +45,7 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
 
         return [
             FormField::key('name')->text()->label(static::labelSchema()['name'])->required(),
+            FormField::key('parent_id')->selectSearch(['' => '—'] + CompanyBrands::parentOptions())->label(static::labelSchema()['parent_id']),
             FormField::key('note')->textarea()->label(static::labelSchema()['note']),
             FormField::key('archived')->select($yesNo)->value('false')->label(static::labelSchema()['archived']),
         ];
@@ -83,7 +85,8 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
      * un altro brand non archiviato si rifiuta, ma solo in creazione o se il
      * nome cambia: un doppione storico (o il brand archiviato da `merge()`)
      * si può ancora correggere e archiviare. Un brand che resta archiviato
-     * non si controlla.
+     * non si controlla. Il brand principale (`parent_id`) passa dalle regole
+     * di `CompanyBrands::parentProblem()`: un livello solo.
      */
     public static function mutateRequestValues(array $values, string $action, string $context = 'backend', ?array $oldValues = null): array
     {
@@ -101,6 +104,18 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
 
         if ($same !== null && (int) $same['id'] !== $id) {
             throw new InvalidArgumentException((string) __t('contacts.brand_taken', ['name' => CompanyBrands::label($same)]));
+        }
+
+        if (array_key_exists('parent_id', $values)) {
+            $raw = $values['parent_id'];
+            $parentId = is_scalar($raw) && preg_match('/^\d*$/', trim((string) $raw)) === 1 ? (int) $raw : -1;
+            $problem = $parentId < 0 ? 'missing' : CompanyBrands::parentProblem($id, $parentId);
+
+            if ($problem !== '') {
+                throw new InvalidArgumentException((string) __t('contacts.brand_parent_'.$problem));
+            }
+
+            $values['parent_id'] = $parentId;
         }
 
         $values['name_key'] = CompanyBrands::nameKey($name);

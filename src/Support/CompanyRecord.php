@@ -2,12 +2,16 @@
 
 namespace Wonder\Plugin\CustomerAccount\Support;
 
+use Throwable;
 use Wonder\Plugin\CustomerAccount\Models\Company;
+use Wonder\Plugin\CustomerAccount\Models\CompanyBrand;
 
 /**
- * Il record di un'azienda (vedi `PartyRecord`), con in più `is_supplier` e i
- * brand legati (`id`, `code`, `slug`, `name`, `role`, `is_default`).
- * `SCHEMA` 3: dalla 2 i brand portano codice, slug, ruolo e predefinito.
+ * Il record di un'azienda (vedi `PartyRecord`), con in più `is_supplier`, la
+ * capogruppo (`parent_id`, `parent_code`) e i brand legati (`id`, `code`,
+ * `slug`, `name`, `role`, `is_default`, `parent_id`, `parent_code`).
+ * `SCHEMA` 3: dalla 2 i brand portano codice, slug, ruolo, predefinito e
+ * brand principale, l'azienda la capogruppo. Senza padre: 0 e stringa vuota.
  */
 final class CompanyRecord extends PartyRecord
 {
@@ -42,15 +46,57 @@ final class CompanyRecord extends PartyRecord
     protected static function extra(array $record, array $row): array
     {
         $record['is_supplier'] = ($row['is_supplier'] ?? 'false') === 'true';
-        $record['brands'] = array_map(static fn (array $link): array => [
-            'id' => $link['brand_id'],
-            'code' => (string) ($link['brand']['code'] ?? ''),
-            'slug' => (string) ($link['brand']['slug'] ?? ''),
-            'name' => CompanyBrands::label($link['brand']),
-            'role' => $link['role'],
-            'is_default' => $link['is_default'],
-        ], CompanyBrands::linksOf((int) $record['id']));
+        $parent = CompanyGroups::parentOf((int) $record['id']);
+        $record['parent_id'] = $parent !== null ? (int) $parent['id'] : 0;
+        $record['parent_code'] = (string) ($parent['code'] ?? '');
+
+        $links = CompanyBrands::linksOf((int) $record['id']);
+        $parents = self::brandCodes(array_map(static fn (array $link): int => (int) ($link['brand']['parent_id'] ?? 0), $links));
+        $record['brands'] = array_map(static function (array $link) use ($parents): array {
+            $parentId = (int) ($link['brand']['parent_id'] ?? 0);
+
+            return [
+                'id' => $link['brand_id'],
+                'code' => (string) ($link['brand']['code'] ?? ''),
+                'slug' => (string) ($link['brand']['slug'] ?? ''),
+                'name' => CompanyBrands::label($link['brand']),
+                'role' => $link['role'],
+                'is_default' => $link['is_default'],
+                'parent_id' => isset($parents[$parentId]) ? $parentId : 0,
+                'parent_code' => $parents[$parentId] ?? '',
+            ];
+        }, $links);
 
         return $record;
+    }
+
+    /**
+     * I codici dei brand padre, in una query.
+     *
+     * @param list<int> $ids
+     * @return array<int, string>
+     */
+    private static function brandCodes(array $ids): array
+    {
+        $ids = array_values(array_unique(array_filter($ids, static fn (int $id): bool => $id > 0)));
+
+        if ($ids === []) {
+            return [];
+        }
+
+        try {
+            $rows = CompanyBrand::find(['id' => $ids], null, null, null, ['id', 'code']);
+        } catch (Throwable) {
+            return [];
+        }
+
+        $rows = is_array($rows) && isset($rows['id']) ? [$rows] : array_filter((array) $rows, 'is_array');
+        $out = [];
+
+        foreach ($rows as $row) {
+            $out[(int) $row['id']] = (string) ($row['code'] ?? '');
+        }
+
+        return $out;
     }
 }

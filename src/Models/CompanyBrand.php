@@ -21,6 +21,8 @@ use Wonder\Sql\TableSchema as Column;
  * `name_key` è il nome senza maiuscole, spazi e punteggiatura: serve a
  * trovare i doppioni con una query sull'indice. Un brand `archived` non si
  * propone più nelle scelte, ma resta leggibile sui documenti che lo usano.
+ * `parent_id` fa del brand una linea di un altro (0 = nessuno): un livello
+ * solo, con le regole di `CompanyBrands::parentProblem()`.
  */
 class CompanyBrand extends Model
 {
@@ -44,6 +46,7 @@ class CompanyBrand extends Model
             Column::key('name_key')->length(150),
             Column::key('note')->type('TEXT'),
             Column::key('archived')->enum(['true', 'false'])->default('false'),
+            Column::key('parent_id')->int()->null(false)->default('0'),
         ];
     }
 
@@ -52,6 +55,7 @@ class CompanyBrand extends Model
         return [
             'ind_name' => ['index' => 'name'],
             'ind_name_key' => ['index' => 'name_key'],
+            'ind_parent' => ['index' => 'parent_id'],
         ];
     }
 
@@ -64,6 +68,7 @@ class CompanyBrand extends Model
             Field::key('name_key')->text()->sanitize(false),
             Field::key('note')->text(),
             Field::key('archived')->text()->sanitize(false),
+            Field::key('parent_id')->number()->decimals(0),
         ];
     }
 

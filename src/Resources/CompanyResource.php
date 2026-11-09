@@ -27,12 +27,13 @@ class CompanyResource extends ContactResource
         return parent::labelSchema() + [
             'is_customer' => (string) __t('contacts.is_customer'),
             'is_supplier' => (string) __t('contacts.is_supplier'),
+            'parent_id' => (string) __t('contacts.company_parent'),
         ];
     }
-    /** Il brand è la prima cosa che chiede. */
+    /** Il brand è la prima cosa che chiede, poi la capogruppo. */
     public static function formSchema(): array
     {
-        return [...static::brandFields(), ...parent::formSchema()];
+        return [...static::brandFields(), ...static::groupFields(), ...parent::formSchema()];
     }
     public static function mutateFormValues(array $values, string $mode, string $context = 'backend'): array
     {
