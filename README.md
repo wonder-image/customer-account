@@ -118,6 +118,7 @@ Fino alla 0.1 un'azienda era una scheda di `contacts` con `type = business`. `Mi
 | privato fornitore | nasce un'azienda fornitore «Nome Cognome», legata alla persona |
 | azienda senza ragione sociale | resta un contatto: va sistemata a mano |
 
+- Il codice dell'azienda è quello del contatto con `cmp_` al posto di `con_` (`con_demo-filati-nord` → `cmp_demo-filati-nord`), così chi riconosce le righe dal codice le ritrova; se è già preso ne nasce uno nuovo.
 - Gli id esterni (`external_references`) passano da `entity_type = contacts` a `contact`, e a `company` per le schede spostate.
 - Ogni scheda trattata finisce in `contact_company_map` (`contact_id`, `company_id`, `action`): i moduli che puntano ai contatti (documenti, fornitori del gestionale) la leggono per spostare i loro riferimenti. È l'unica eccezione alla regola «niente spostamenti di dati» delle migrazioni del modulo.
 - È idempotente: senza la colonna `type` non fa niente, e una scheda già nella mappa non si ritratta.
