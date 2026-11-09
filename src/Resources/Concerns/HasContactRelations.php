@@ -207,7 +207,7 @@ trait HasContactRelations
             }
 
             $relation = $entry['relation'];
-            $rows = static::prepareRepeaterRows($inputName, Repeater::rowsFromRequest($inputName, $post, $files), $action, $context);
+            $rows = static::prepareRepeaterRows($inputName, Repeater::rowsFromRequest($inputName, $post, $files, Repeater::columnDefaults($entry['field'])), $action, $context);
             $summary[$inputName] = Repeater::syncRelatedRows(
                 $relation,
                 $parentId,

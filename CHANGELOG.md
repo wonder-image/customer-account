@@ -18,6 +18,10 @@
 - `AccountBilling::saveCompany()`: salva la fatturazione di un'azienda con la stessa validazione della scheda; il permesso lo controlla chi chiama (l'ecommerce lo fa solo per gli `admin`).
 - Traduzioni delle aziende e degli accessi (`contacts.json`, it/en).
 
+### Fixed
+
+- Gli indirizzi di consegna mai compilati non si salvano più solo perché la nazione è precompilata su `IT` (o «Predefinito» su No): `HasContactRelations::syncRepeaterRelations()` passa `Repeater::columnDefaults()` di `wonder-image/app`.
+
 ### Removed
 
 - Il tipo `private`/`business` delle schede: `ContactRelations::typesOf()`, la chiave `type` di `ContactRecord` e la colonna «Tipo» dell'export.
