@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### Breaking
+
+- Le aziende non sono più schede di `contacts`: stanno in `companies` / `company_addresses` (`Company`, `CompanyAddress`, `CompanyResource` su `/backend/companies/`, `CompanyAddressResource`). `contacts` perde `type`, `business_name`, `pi`, `sdi`, `pec` e `is_supplier`; i fornitori sono sempre aziende.
+- `contact_relations.company_id` punta a `companies`. Ogni scheda ha un solo repeater: «Referenti» (`contact_people`) sulle aziende, «Aziende» (`contact_companies`) sulle persone.
+- `ContactRecord` passa a `SCHEMA` 2 con `entity` e `code`; gli id esterni usano `entity_type = contact` (prima `contacts`) e `company`.
+
+### Added
+
+- `CompanySplitMigration`: al `forge update` sposta le aziende senza account in `companies` (scheda vecchia nel cestino), lega a una nuova azienda con accesso `admin` le aziende con account, crea un'azienda fornitore per i privati fornitori, lascia come contatti le aziende senza ragione sociale. Scrive `contact_company_map` per i moduli dipendenti. L'azienda tiene il codice del contatto con prefisso `cmp_` (`CompanySplitMigration::codeFromContact()`). Idempotente.
+- Comando `php forge customer-account:companies`: cosa farà la migrazione, senza scrivere.
+- `contact_relations.access` (`none`, `buyer`, `admin`), colonna «Accesso» nei repeater, `ContactRelations::accessOf()` e filtro `companiesOf($personId, $access)`.
+- `CompanyRecord` e la base comune `PartyRecord`; eventi `company.created` / `company.updated` (`CompanyEvents`).
+- `ContactExport::PERSON_FIELDS` e `COMPANY_FIELDS`; `columns()` accetta l'elenco dei campi.
+- `AccountBilling::saveCompany()`: salva la fatturazione di un'azienda con la stessa validazione della scheda; il permesso lo controlla chi chiama (l'ecommerce lo fa solo per gli `admin`).
+- Traduzioni delle aziende e degli accessi (`contacts.json`, it/en).
+
+### Removed
+
+- Il tipo `private`/`business` delle schede: `ContactRelations::typesOf()`, la chiave `type` di `ContactRecord` e la colonna «Tipo» dell'export.
+
+### Deprecated
+
+- `ContactExport::FIELDS`: usare `PERSON_FIELDS` o `COMPANY_FIELDS`.
+
 ### Changed
 
 - I referenti delle aziende sono sempre attivi: l'interruttore `relations.enabled` non c'è più e `ContactRelations::enabled()` vale sempre `true`.

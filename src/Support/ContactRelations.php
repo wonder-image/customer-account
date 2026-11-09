@@ -4,14 +4,16 @@ namespace Wonder\Plugin\CustomerAccount\Support;
 
 use Wonder\App\Support\Repeater;
 use Wonder\App\ResourceSchema\RepeaterRelation;
+use Wonder\Plugin\CustomerAccount\Models\Company;
 use Wonder\Plugin\CustomerAccount\Models\Contact;
 use Wonder\Plugin\CustomerAccount\Models\ContactRelation;
 
 /**
- * I legami azienda/persona della rubrica (`contact_relations`).
+ * I legami fra aziende (`companies`) e persone (`contacts`), in `contact_relations`.
  *
  * Una persona può essere referente di più aziende, un'azienda può avere più
- * referenti. Sempre attivi: `enabled()` resta per chi lo chiama e per i test.
+ * referenti. `access` dice cosa può fare la persona per l'azienda nell'area
+ * cliente. Sempre attivi: `enabled()` resta per chi lo chiama e per i test.
  */
 final class ContactRelations
 {
@@ -37,30 +39,34 @@ final class ContactRelations
         return $parentColumn === self::COMPANY ? self::PERSON : self::COMPANY;
     }
 
-    /** Il tipo di scheda che sta dall'altro lato: un'azienda ha persone, una persona aziende. */
-    public static function counterpartType(string $parentColumn): string
+    /**
+     * Il Model dell'altro lato: un'azienda ha persone, una persona aziende.
+     *
+     * @return class-string<\Wonder\App\Model>
+     */
+    public static function counterpartModel(string $parentColumn): string
     {
-        return $parentColumn === self::COMPANY ? 'private' : 'business';
+        return $parentColumn === self::COMPANY ? Contact::class : Company::class;
     }
 
     /**
      * Le righe postate da un repeater, pronte per `Repeater::syncRelatedRows()`.
      *
-     * Toglie le righe senza controparte, i legami con sé stessi, le schede del
-     * tipo sbagliato e i doppioni (vince la prima). Una coppia che esiste già,
-     * anche cancellata, riprende l'id della sua riga: così la chiave unica
-     * azienda/persona non salta e la riga torna viva. Al massimo un referente
-     * principale.
+     * Toglie le righe senza controparte, le controparti che non esistono e i
+     * doppioni (vince la prima). Una coppia che esiste già, anche cancellata,
+     * riprende l'id della sua riga: così la chiave unica azienda/persona non
+     * salta e la riga torna viva. Al massimo un referente principale. Se la
+     * riga non porta `access`, resta quello di prima (`none` per le nuove).
      *
      * @param list<array<string, mixed>> $posted
      * @param list<array<string, mixed>> $existing tutte le righe del padre, cancellate comprese
-     * @param array<int|string, string> $typesById tipo (`business`/`private`) delle controparti
+     * @param list<int> $validIds le controparti vive
      * @return list<array<string, mixed>>
      */
-    public static function normalize(array $posted, array $existing, string $parentColumn, int $parentId, array $typesById): array
+    public static function normalize(array $posted, array $existing, string $parentColumn, int $parentId, array $validIds): array
     {
         $other = self::counterpart($parentColumn);
-        $type = self::counterpartType($parentColumn);
+        $valid = array_fill_keys(array_map('intval', $validIds), true);
         $existingByCounterpart = [];
 
         foreach ($existing as $row) {
@@ -78,8 +84,7 @@ final class ContactRelations
         foreach ($posted as $row) {
             $counterpartId = (int) ($row[$other] ?? 0);
 
-            if ($counterpartId <= 0 || $counterpartId === $parentId || isset($seen[$counterpartId])
-                || ($typesById[$counterpartId] ?? null) !== $type) {
+            if ($counterpartId <= 0 || isset($seen[$counterpartId]) || !isset($valid[$counterpartId])) {
                 continue;
             }
 
@@ -89,6 +94,7 @@ final class ContactRelations
                 'job_title' => trim((string) ($row['job_title'] ?? '')),
                 'is_primary' => self::flag($row['is_primary'] ?? 'false'),
                 'receives_documents' => self::flag($row['receives_documents'] ?? 'false'),
+                'access' => self::access($row['access'] ?? $existingByCounterpart[$counterpartId]['access'] ?? null),
                 'deleted' => 'false',
             ];
 
@@ -113,6 +119,12 @@ final class ContactRelations
         return in_array($value, [true, 1, '1', 'true', 'on', 'yes'], true) ? 'true' : 'false';
     }
 
+    /** Un valore di `access` valido; tutto il resto è `none`. */
+    public static function access(mixed $value): string
+    {
+        return in_array($value, ContactRelation::ACCESS, true) ? (string) $value : ContactRelation::ACCESS_NONE;
+    }
+
     /**
      * Tutte le righe di un padre, cancellate comprese.
      *
@@ -127,7 +139,7 @@ final class ContactRelations
     }
 
     /**
-     * I referenti vivi di un'azienda, in ordine: ogni riga del legame con la
+     * I referenti di un'azienda, in ordine: ogni riga del legame con la
      * scheda della persona sotto `contact`.
      *
      * @return list<array<string, mixed>>
@@ -138,34 +150,55 @@ final class ContactRelations
     }
 
     /**
-     * Le aziende vive di una persona, in ordine, con la scheda sotto `contact`.
+     * Le aziende di una persona, in ordine, con la scheda sotto `company`.
      *
+     * @param list<string>|null $access solo i legami con questi accessi (`buyer`, `admin`)
      * @return list<array<string, mixed>>
      */
-    public static function companiesOf(int $personId): array
+    public static function companiesOf(int $personId, ?array $access = null): array
     {
-        return self::linked(self::PERSON, $personId);
+        $rows = self::linked(self::PERSON, $personId);
+
+        if ($access === null) {
+            return $rows;
+        }
+
+        return array_values(array_filter(
+            $rows,
+            static fn (array $row): bool => in_array($row['access'] ?? ContactRelation::ACCESS_NONE, $access, true)
+        ));
+    }
+
+    /** L'accesso di una persona a un'azienda: `none` se non sono legate. */
+    public static function accessOf(int $personId, int $companyId): string
+    {
+        foreach (self::rows(ContactRelation::find([self::PERSON => $personId, self::COMPANY => $companyId, 'deleted' => 'false'])) as $row) {
+            return self::access($row['access'] ?? null);
+        }
+
+        return ContactRelation::ACCESS_NONE;
     }
 
     /**
-     * Il tipo (`business`/`private`) di ogni scheda viva fra quelle indicate.
+     * Quali fra gli id indicati esistono dall'altro lato del legame.
      *
      * @param list<int> $ids
-     * @return array<int, string>
+     * @return list<int>
      */
-    public static function typesOf(array $ids): array
+    public static function existingCounterparts(string $parentColumn, array $ids): array
     {
-        $types = [];
+        $model = self::counterpartModel($parentColumn);
+        $out = [];
 
         foreach (array_unique(array_filter(array_map('intval', $ids))) as $id) {
-            $contact = Contact::findById($id);
+            $row = $model::findById($id);
 
-            if (is_array($contact) && isset($contact['id'])) {
-                $types[$id] = (string) ($contact['type'] ?? 'private');
+            if (is_array($row) && isset($row['id'])) {
+                $out[] = $id;
             }
         }
 
-        return $types;
+        return $out;
     }
 
     /**
@@ -189,7 +222,6 @@ final class ContactRelations
         }
 
         $values = [
-            'type' => 'private',
             'is_customer' => 'false',
             'active' => 'true',
             'name' => $name,
@@ -220,7 +252,7 @@ final class ContactRelations
      * passano da qui.
      *
      * `$rows` sono le righe grezze dell'altro lato (`person_id` o `company_id`,
-     * `job_title`, `is_primary`, `receives_documents`; dal lato azienda anche
+     * `job_title`, `is_primary`, `receives_documents`, `access`; dal lato azienda anche
      * `new_name`, `new_surname`, `new_email` per creare la persona). Le righe non
      * presenti si cancellano (soft delete). Emette `ContactEvents::LINKED` e
      * `UNLINKED` per le coppie che cambiano, `CREATED` per le persone nuove.
@@ -242,8 +274,8 @@ final class ContactRelations
         }
 
         $before = self::liveByCounterpart($parentColumn, $parentId);
-        $types = self::typesOf(array_map(static fn (array $row): int => (int) ($row[$other] ?? 0), $rows));
-        $clean = self::normalize($rows, self::allRowsOf($parentColumn, $parentId), $parentColumn, $parentId, $types);
+        $valid = self::existingCounterparts($parentColumn, array_map(static fn (array $row): int => (int) ($row[$other] ?? 0), $rows));
+        $clean = self::normalize($rows, self::allRowsOf($parentColumn, $parentId), $parentColumn, $parentId, $valid);
         $relation = RepeaterRelation::make(ContactRelation::$table, $parentColumn)
             ->model(ContactRelation::class)
             ->positionKey('position')
@@ -315,13 +347,15 @@ final class ContactRelations
         }
 
         $other = self::counterpart($parentColumn);
+        $model = self::counterpartModel($parentColumn);
+        $key = $parentColumn === self::COMPANY ? 'contact' : 'company';
         $out = [];
 
         foreach (self::rows(ContactRelation::find([$parentColumn => $parentId], null, 'position', 'ASC')) as $row) {
-            $contact = Contact::findById((int) ($row[$other] ?? 0));
+            $record = $model::findById((int) ($row[$other] ?? 0));
 
-            if (is_array($contact) && isset($contact['id'])) {
-                $out[] = $row + ['contact' => $contact];
+            if (is_array($record) && isset($record['id'])) {
+                $out[] = $row + [$key => $record];
             }
         }
 
