@@ -8,5 +8,6 @@
   "csrf": "Invalid form session. Reload the page and try again.",
   "relations": "Contacts and companies", "people": "Contacts", "companies": "Companies", "person": "Person", "company": "Company", "job_title": "Job title", "is_primary": "Primary contact", "receives_documents": "Receives documents", "new_name": "Or new person: first name", "new_surname": "Last name", "new_email": "Email", "yes": "Yes", "no": "No", "add_person": "Add contact", "add_company": "Add company",
   "access": "Customer area access", "access_none": "None", "access_buyer": "Orders", "access_admin": "Manages the company",
-  "is_customer": "Customer", "is_supplier": "Supplier"
+  "is_customer": "Customer", "is_supplier": "Supplier",
+  "brand": "Brand", "brands": "Brands", "brand_name": "Brand name", "brand_required": "Enter the brand name.", "brand_taken": "The brand “{{name}}” already exists.", "brand_not_created": "The brand was not created.", "brand_existing": "The brand “{{name}}” already existed: it is now selected.", "brand_add": "New brand", "brands_label": "Brands (trade names)", "brands_tooltip": "The trade names the company works under; a brand can belong to several companies.", "department": "Department", "department_none": "—", "department_administration": "Administration", "department_purchasing": "Purchasing", "department_sales": "Sales", "department_technical": "Technical", "department_management": "Management", "department_other": "Other"
 }

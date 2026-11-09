@@ -162,6 +162,7 @@ abstract class PartyRecord
             $out[] = [
                 $other => (int) ($row[$other] ?? 0),
                 'job_title' => (string) ($row['job_title'] ?? ''),
+                'department' => ContactRelations::department($row['department'] ?? ''),
                 'is_primary' => ($row['is_primary'] ?? 'false') === 'true',
                 'receives_documents' => ($row['receives_documents'] ?? 'false') === 'true',
                 'access' => ContactRelations::access($row['access'] ?? null),
