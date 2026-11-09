@@ -14,6 +14,9 @@ $loader = require $app.'/vendor/autoload.php';
 $loader->addPsr4('Wonder\\Plugin\\CustomerAccount\\', dirname(__DIR__).'/src', true);
 define('WI_APP_ROOT', $app);
 
+// Niente rete nei test: la validazione delle email non deve dipendere dal DNS.
+require_once __DIR__.'/support/NoDns.php';
+
 if (!function_exists('__t')) {
     function __t(string $key, array $replace = []): string { return $key; }
 }

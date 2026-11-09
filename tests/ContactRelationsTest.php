@@ -20,6 +20,7 @@ use Wonder\Plugin\CustomerAccount\Support\ContactRecord;
 use Wonder\Plugin\CustomerAccount\Support\ContactRelations;
 
 use Wonder\Plugin\CustomerAccount\Resources\CompanyResource;
+use Wonder\Plugin\CustomerAccount\Support\CompanyBrands;
 use Wonder\Plugin\CustomerAccount\Support\CompanyRecord;
 
 $row = static fn (int $id, array $extra = []): array => ['id' => $id, 'deleted' => 'false', 'active' => 'true'] + $extra;
@@ -276,6 +277,105 @@ check('fromArray tiene i campi noti, validate dà gli errori del tipo', function
         && ContactRecord::validate($person) === [] && CompanyRecord::validate($company) === []
         && $badPerson === ['name' => 'required', 'email' => 'invalid', 'relations.0' => 'invalid']
         && $badCompany === ['business_name' => 'required', 'pec' => 'invalid', 'relations.1' => 'invalid'];
+});
+
+// Referenti per brand: l'azienda 1 ha i brand 1 e 2, il brand 3 è solo dell'azienda 4.
+$brandTables = static fn (): array => $tables() + [
+    'company_brands' => [
+        1 => ['id' => 1, 'name' => 'RClass', 'archived' => 'false', 'deleted' => 'false'],
+        2 => ['id' => 2, 'name' => 'La Piana', 'archived' => 'false', 'deleted' => 'false'],
+        3 => ['id' => 3, 'name' => 'Altro', 'archived' => 'false', 'deleted' => 'false'],
+    ],
+    'company_brand_links' => [
+        1 => ['id' => 1, 'company_id' => 1, 'brand_id' => 1, 'position' => 0, 'ended_at' => null, 'deleted' => 'false'],
+        2 => ['id' => 2, 'company_id' => 1, 'brand_id' => 2, 'position' => 1, 'ended_at' => null, 'deleted' => 'false'],
+        3 => ['id' => 3, 'company_id' => 4, 'brand_id' => 3, 'position' => 0, 'ended_at' => null, 'deleted' => 'false'],
+    ],
+    'contact_relations' => [
+        1 => ['id' => 1, 'company_id' => 1, 'person_id' => 2, 'position' => 1, 'deleted' => 'false'],
+        2 => ['id' => 2, 'company_id' => 1, 'person_id' => 3, 'position' => 2, 'deleted' => 'false'],
+    ],
+    'contact_relation_brands' => [],
+];
+
+check('brand dei referenti: solo brand dell\'azienda del legame, lista vuota = tutti', function () use ($brandTables) {
+    Query::reset($brandTables());
+    $saved = ContactRelations::setBrands(1, [2, '3', 99, 2]);
+    $read = ContactRelations::brandsOf(1);
+    $none = ContactRelations::setBrands(99, [1]);
+    $cleared = ContactRelations::setBrands(1, []);
+
+    return $saved === [2] && $read === [2] && $none === [] && $cleared === []
+        && ContactRelations::brandsOf(1) === [] && Query::$tables['contact_relation_brands'] === [];
+});
+
+check('peopleOf con un brand: chi lo segue e chi segue tutti', function () use ($brandTables) {
+    Query::reset($brandTables());
+    ContactRelations::setBrands(1, [2]);
+
+    return array_column(ContactRelations::peopleOf(1, 1), 'person_id') === [3]
+        && array_column(ContactRelations::peopleOf(1, 2), 'person_id') === [2, 3]
+        && array_column(ContactRelations::peopleOf(1), 'person_id') === [2, 3];
+});
+
+check('repeater dei referenti: colonna «Brand» multipla, valori nel form, riga senza brand_ids li tiene', function () use ($brandTables) {
+    Query::reset($brandTables());
+    ContactRelations::setBrands(2, [1]);
+    $columns = static fn (string $resource, string $input): array => array_map(
+        static fn ($column) => $column->name,
+        (array) $resource::formFieldsByKey()[$input]->get('context')['columns']
+    );
+    $brandColumn = array_values(array_filter((array) CompanyResource::formFieldsByKey()[CompanyResource::RELATION_PEOPLE]->get('context')['columns'], static fn ($c) => $c->name === 'brand_ids'))[0];
+
+    CompanyResource::syncRepeaterRelations(1, [
+        CompanyResource::RELATION_MARKER => '1',
+        CompanyResource::RELATION_PEOPLE => [
+            'row_1' => ['id' => '1', 'person_id' => '2', 'brand_ids' => ['', '1', '3']],
+            'row_2' => ['id' => '2', 'person_id' => '3'],
+        ],
+    ]);
+    $form = CompanyResource::hydrateRepeaterFormValues([], 1, [], []);
+
+    return in_array('brand_ids', $columns(CompanyResource::class, CompanyResource::RELATION_PEOPLE), true)
+        && !in_array('brand_ids', $columns(ContactResource::class, ContactResource::RELATION_COMPANIES), true)
+        && $brandColumn->get('multiple') === true
+        && ContactRelations::brandsOf(1) === [1] && ContactRelations::brandsOf(2) === [1]
+        && array_column($form[CompanyResource::RELATION_PEOPLE], 'brand_ids', 'person_id') === [2 => [1], 3 => [1]];
+});
+
+check('brand seguiti orfani: contano solo quelli ancora legati, se non resta niente segue tutti', function () use ($brandTables) {
+    $tables = $brandTables();
+    $tables['company_brand_links'][2]['ended_at'] = '2026-01-01 00:00:00';
+    $tables['contact_relation_brands'] = [1 => ['id' => 1, 'relation_id' => 1, 'brand_id' => 2, 'deleted' => 'false']];
+    Query::reset($tables);
+
+    return ContactRelations::brandsOf(1) === [] && ContactRelations::brandsByRelation([1, 2]) === []
+        && array_column(ContactRelations::peopleOf(1, 1), 'person_id') === [2, 3]
+        && ContactRelations::withBrandIds([['id' => 1, 'person_id' => 2]])[0]['brand_ids'] === [];
+});
+
+check('staccare un brand dall\'azienda toglie le righe dei referenti che lo seguivano', function () use ($brandTables) {
+    Query::reset($brandTables());
+    ContactRelations::setBrands(1, [2]);
+    ContactRelations::setBrands(2, [1, 2]);
+    CompanyBrands::sync(1, [1]);
+
+    return array_column(Query::$tables['contact_relation_brands'], 'brand_id', 'relation_id') === [2 => 1]
+        && array_column(ContactRelations::peopleOf(1, 1), 'person_id') === [2, 3];
+});
+
+check('repeater dei referenti: il select multiplo svuotato posta [\'\'] e svuota il filtro', function () use ($brandTables) {
+    Query::reset($brandTables());
+    ContactRelations::setBrands(1, [1]);
+    CompanyResource::syncRepeaterRelations(1, [
+        CompanyResource::RELATION_MARKER => '1',
+        CompanyResource::RELATION_PEOPLE => [
+            'row_1' => ['id' => '1', 'person_id' => '2', 'brand_ids' => ['']],
+            'row_2' => ['id' => '2', 'person_id' => '3', 'brand_ids' => ['']],
+        ],
+    ]);
+
+    return ContactRelations::brandsOf(1) === [] && Query::$tables['contact_relation_brands'] === [];
 });
 
 summary();

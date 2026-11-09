@@ -13,6 +13,9 @@ use Wonder\Sql\TableSchema as Column;
 /**
  * Un'azienda: cliente, fornitore o tutte e due. Esiste anche senza persone;
  * le persone si collegano con `ContactRelation`.
+ *
+ * `parent_id` è la capogruppo (0 = nessuna): un livello solo, con le regole
+ * di `Support\CompanyGroups`, l'unico punto che la valida.
  */
 class Company extends Model
 {
@@ -39,6 +42,7 @@ class Company extends Model
             ...static::sqlColumnsFromDataSchema(['code', 'email', 'color']),
             ...static::billing()->tableSchema(),
             Column::key('is_supplier')->enum(['true', 'false'])->default('false'),
+            Column::key('parent_id')->int()->null(false)->default('0'),
             ...static::partyColumns(),
         ];
     }
@@ -49,6 +53,7 @@ class Company extends Model
             'ind_customer' => ['index' => 'is_customer'],
             'ind_supplier' => ['index' => 'is_supplier'],
             'ind_pi' => ['index' => 'pi'],
+            'ind_parent' => ['index' => 'parent_id'],
         ];
     }
 
@@ -58,6 +63,7 @@ class Company extends Model
             Field::key('code')->text()->uniqueCode('cmp_'),
             ...static::billing()->dataSchema(),
             Field::key('is_supplier')->text()->sanitize(false),
+            Field::key('parent_id')->number()->decimals(0),
             ...static::partyFields(),
         ];
     }

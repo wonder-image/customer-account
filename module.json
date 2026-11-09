@@ -30,7 +30,8 @@
         "models": "src/Models",
         "migrations": [
             "Wonder\\Plugin\\CustomerAccount\\Migrations\\LegacyContactTablesMigration",
-            "Wonder\\Plugin\\CustomerAccount\\Migrations\\CompanySplitMigration"
+            "Wonder\\Plugin\\CustomerAccount\\Migrations\\CompanySplitMigration",
+            "Wonder\\Plugin\\CustomerAccount\\Migrations\\CompanyBrandCodesMigration"
         ]
     },
     "views": {
