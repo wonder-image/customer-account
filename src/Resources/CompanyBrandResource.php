@@ -11,6 +11,7 @@ use Wonder\Elements\Form\Form;
 use Wonder\Plugin\CustomerAccount\Models\CompanyBrand;
 use Wonder\Plugin\CustomerAccount\Support\BrandData;
 use Wonder\Plugin\CustomerAccount\Support\CompanyBrands;
+use Wonder\Plugin\CustomerAccount\Support\ContactPoints;
 use Wonder\Plugin\CustomerAccount\Support\ContactRelations;
 
 /**
@@ -20,8 +21,10 @@ use Wonder\Plugin\CustomerAccount\Support\ContactRelations;
  * Codice e slug nascono alla creazione e non cambiano; un brand si archivia
  * dal suo form (campo «Archiviato») e il form avvisa dei nomi simili.
  *
- * Il form ha due gruppi: i dati per tutti (logo, sito, dominio, descrizione)
- * e il «brand kit», che compare e si salva solo se `CompanyBrands::kitEnabled()`.
+ * Il form ha due gruppi: i dati per tutti (logo, sito, domini email,
+ * descrizione) e il «brand kit» (recapiti, social, colori, tono, settore,
+ * lingua, materiali), che compare e si salva solo se `CompanyBrands::kitEnabled()`.
+ * Liste e scelte passano da `BrandData`: settori ATECO / NACE, lingue ISO.
  *
  * Un modulo che usa altri ruoli la estende e cambia `permissionSchema()`.
  */
@@ -60,8 +63,14 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
             FormField::key('name')->text()->label($labels['name'])->required(),
             FormField::key('parent_id')->selectSearch(['' => '—'] + CompanyBrands::parentOptions())->label($labels['parent_id']),
             FormField::key('logo')->fileDragDrop('image')->label($labels['logo']),
-            FormField::key('website')->text()->label($labels['website']),
-            FormField::key('domain')->text()->label($labels['domain']),
+            FormField::key('website')->url()->label($labels['website']),
+            FormField::key('domains')
+                ->repeater([
+                    RepeaterColumn::key('domain')->text()->placeholder('lapiana.it')->label((string) __t('contacts.brand_domain_row'))->columnFill(),
+                ])
+                ->nested()
+                ->repeaterAddLabel((string) __t('contacts.brand_domain_add'))
+                ->label($labels['domains']),
             FormField::key('description')->textarea()->label($labels['description']),
             FormField::key('note')->textarea()->label($labels['note']),
             FormField::key('archived')->select($yesNo)->value('false')->label($labels['archived']),
@@ -71,30 +80,57 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
             return $fields;
         }
 
+        $kinds = [];
+
+        foreach (ContactPoints::KINDS as $kind) {
+            $kinds[$kind] = (string) __t('contacts.point_kind_'.$kind);
+        }
+
         return [
             ...$fields,
-            FormField::key('email')->email()->label($labels['email']),
-            FormField::key('phone_prefix')->text()->label($labels['phone_prefix']),
-            FormField::key('phone')->text()->label($labels['phone']),
+            FormField::key('contacts')
+                ->repeater([
+                    RepeaterColumn::key('kind')->select($kinds)->value(ContactPoints::EMAIL)->label((string) __t('contacts.point_kind'))->columnSpan(3),
+                    RepeaterColumn::key('email')->email()->label((string) __t('contacts.point_kind_email'))->columnFill()
+                        ->visibleWhen('kind', ContactPoints::EMAIL),
+                    RepeaterColumn::key('phone_prefix')->phonePrefix()->label((string) __t('contacts.point_prefix'))->columnSpan(2)
+                        ->visibleWhen('kind', ContactPoints::PHONE),
+                    RepeaterColumn::key('phone')->tel()->label((string) __t('contacts.point_kind_phone'))->columnFill()
+                        ->visibleWhen('kind', ContactPoints::PHONE),
+                    RepeaterColumn::key('label')->text()->label((string) __t('contacts.point_label'))->columnSpan(12),
+                ])
+                ->nested()
+                ->repeaterAdvanced('label')
+                ->repeaterAdvancedLabel((string) __t('contacts.point_advanced'))
+                ->repeaterAddLabel((string) __t('contacts.point_add'))
+                ->label($labels['contacts']),
             FormField::key('socials')
                 ->repeater([
                     RepeaterColumn::key('network')->select(BrandData::socials())->label((string) __t('contacts.brand_social_network'))->columnSpan(4),
-                    RepeaterColumn::key('url')->text()->label((string) __t('contacts.brand_social_url'))->columnSpan(8),
+                    RepeaterColumn::key('url')->url()->label((string) __t('contacts.brand_social_url'))->columnFill(),
                 ])
                 ->nested()
                 ->repeaterAddLabel((string) __t('contacts.brand_social_add'))
                 ->label($labels['socials']),
-            FormField::key('colors')->text()->label($labels['colors']),
+            FormField::key('colors')
+                ->repeater([
+                    RepeaterColumn::key('color')->color()->label((string) __t('contacts.brand_color'))->columnFill(),
+                ])
+                ->nested()
+                ->repeaterSortable()
+                ->repeaterAddLabel((string) __t('contacts.brand_color_add'))
+                ->label($labels['colors']),
             FormField::key('tone')->textarea()->label($labels['tone']),
-            FormField::key('sector')->text()->label($labels['sector']),
-            FormField::key('language')->text()->label($labels['language']),
-            FormField::key('assets_url')->text()->label($labels['assets_url']),
+            FormField::key('sector')->selectSearch(['' => '—'] + BrandData::sectors())->label($labels['sector']),
+            FormField::key('language')->selectSearch(BrandData::languages())->value(BrandData::DEFAULT_LANGUAGE)->label($labels['language']),
+            FormField::key('assets_url')->url()->label($labels['assets_url']),
         ];
     }
+
     /** Due gruppi: i dati del brand e, se acceso, il brand kit. */
     public static function formLayoutSchema(): ?Form
     {
-        $widths = ['phone_prefix' => 3, 'phone' => 9, 'website' => 8, 'domain' => 4, 'sector' => 8, 'language' => 4];
+        $widths = ['website' => 12, 'sector' => 8, 'language' => 4];
         $kit = array_flip(BrandData::KIT_FIELDS);
         $groups = [[], []];
 
@@ -113,9 +149,12 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
 
         return (new Form)->columns(12)->components($cards);
     }
-    /** Social e colori stanno in JSON: nel form tornano righe e testo. */
+    /** Liste in JSON: nel form tornano righe del repeater. */
     public static function mutateFormValues(array $values, string $mode, string $context = 'backend'): array
     {
+        $values['domains'] = array_map(static fn (string $domain): array => ['domain' => $domain], BrandData::domainsOf($values));
+        $values['contacts'] = BrandData::contactsOf($values);
+
         foreach (['socials', 'colors'] as $field) {
             if (isset($values[$field]) && is_string($values[$field])) {
                 $decoded = json_decode($values[$field], true);
@@ -134,7 +173,14 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
         }
 
         if (isset($values['colors']) && is_array($values['colors'])) {
-            $values['colors'] = implode(', ', array_filter($values['colors'], 'is_string'));
+            $values['colors'] = array_map(static fn (string $color): array => ['color' => $color], array_values(array_filter($values['colors'], 'is_string')));
+        }
+
+        // Una lingua di prima con il paese (`en-GB`) si mostra con la sua lingua (`en`).
+        $language = strtolower(substr(trim((string) ($values['language'] ?? '')), 0, 2));
+
+        if ($language !== '' && isset(BrandData::languages()[$language])) {
+            $values['language'] = $language;
         }
 
         return parent::mutateFormValues($values, $mode, $context);

@@ -49,7 +49,8 @@ final class CompanyBrands
 
     /**
      * Il brand di un'email in arrivo o di un dominio («ordini@lapiana.it»,
-     * «https://www.lapiana.it»), dal campo `domain`: vale anche un
+     * «https://www.lapiana.it»), dai domini email del brand (`domains`, più
+     * `domain` dei brand di prima): vale anche un
      * sottodominio («news.lapiana.it»). Una casella generica (gmail.com,
      * yahoo.*, le PEC dei gestori, …: `BrandData::isMailProvider()`) o un
      * social / servizio di siti (`BrandData::isSiteHost()`) non corrisponde
@@ -90,8 +91,15 @@ final class CompanyBrands
 
         $found = [];
 
-        foreach (self::rows(self::safe(static fn () => CompanyBrand::find(['domain' => $candidates, 'archived' => 'false'], null, 'id', 'ASC'))) as $row) {
-            $found[(string) $row['domain']][] = $row;
+        // I brand sono pochi e già letti per la richiesta: il confronto si fa qui.
+        foreach (self::allById() as $row) {
+            if (self::archived($row)) {
+                continue;
+            }
+
+            foreach (array_intersect(BrandData::domainsOf($row), $candidates) as $match) {
+                $found[$match][] = $row;
+            }
         }
 
         foreach ($candidates as $candidate) {

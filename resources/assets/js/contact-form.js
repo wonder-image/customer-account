@@ -2,10 +2,10 @@
  * customer-account: il riquadro «Contatti» e la ricerca per nome negli indirizzi
  * dei form del backend. Lo stampa una volta `Support\ContactFormScript`.
  *
- * Il framework non sa ancora nascondere una colonna di repeater secondo un
- * select della stessa riga (`visibleWhen()` cerca il campo per nome in tutto
- * il form), né scrivere il nome dell'attività scelta da Google in un campo
- * (`places.js` non lo passa): finché non lo fanno core e lib, lo fa questo.
+ * Le colonne per tipo (email o prefisso e numero) le mostra e nasconde il
+ * framework (`visibleWhen('kind', …)`); il minimo di una riga lo tiene
+ * `repeaterMinRows(1)`. Qui restano un principale per tipo, la riga
+ * dell'email di accesso bloccata e il nome dell'attività scelta da Google.
  * Le regole vere stanno sul server (`ContactPoints::split()`): qui c'è solo
  * quello che serve a vederle subito.
  */
@@ -13,13 +13,6 @@
 
     if (window.caContactForm) { return; }
     window.caContactForm = true;
-
-    // La cella di una colonna: il figlio diretto del fieldset della riga.
-    function cell(input) {
-        var node = input;
-        while (node && node.parentElement && node.parentElement.tagName !== 'FIELDSET') { node = node.parentElement; }
-        return node && node.parentElement ? node : input.parentElement;
-    }
 
     function rowOf(input) { return input.closest('.wi-repeater-row'); }
 
@@ -33,24 +26,12 @@
         el.dispatchEvent(new Event('change', { bubbles: true }));
     }
 
-    // Email: solo la casella dell'email. Telefono: prefisso e numero.
-    // Il campo nascosto si disabilita: il browser non lo valida (un'email storta
-    // lasciata lì non blocca l'invio senza messaggio) e non si posta; il valore
-    // resta, così tornando al tipo di prima si ritrova. Il server prende il
-    // valore dalla colonna del tipo scelto: l'altra, assente, non svuota niente.
     function refreshRow(row) {
-        var kind = kindOf(row);
-        if (!kind) { return; }
+        if (!kindOf(row)) { return; }
 
-        row.querySelectorAll('[data-ca-point-only]').forEach(function (input) {
-            var box = cell(input);
-            var show = input.getAttribute('data-ca-point-only') === kind;
-            box.style.display = show ? '' : 'none';
-            box.setAttribute('aria-hidden', show ? 'false' : 'true');
-            input.disabled = !show;
-
-            // Un'email storica che il browser non accetta, lasciata com'è: il server la tiene (`ContactPoints::split()`).
-            if (show && input.type === 'email' && input.value !== '' && input.value === input.defaultValue && input.validity && input.validity.typeMismatch) {
+        // Un'email storica che il browser non accetta, lasciata com'è: il server la tiene (`ContactPoints::split()`).
+        row.querySelectorAll('input[type="email"][data-ca-point-only]').forEach(function (input) {
+            if (input.value !== '' && input.value === input.defaultValue && input.validity && input.validity.typeMismatch) {
                 input.type = 'text';
                 input.setAttribute('inputmode', 'email');
             }

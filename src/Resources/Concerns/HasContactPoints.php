@@ -6,6 +6,7 @@ use InvalidArgumentException;
 use Wonder\App\ResourceSchema\FormField;
 use Wonder\App\ResourceSchema\Input;
 use Wonder\App\ResourceSchema\RepeaterColumn;
+use Wonder\Elements\Components\RichText;
 use Wonder\Plugin\CustomerAccount\Support\ContactFormScript;
 use Wonder\Plugin\CustomerAccount\Support\ContactPoints;
 use Wonder\Plugin\CustomerAccount\Support\ContactRelations;
@@ -42,11 +43,15 @@ trait HasContactPoints
     }
 
     /**
-     * Il riquadro «Contatti»: tipo, email (o prefisso e numero), etichetta,
-     * principale e, per le aziende, «Si occupa di». La colonna dell'altro tipo
-     * la nasconde lo script del modulo (`contactFormScript()`), che spegne
-     * anche gli altri principali dello stesso tipo e blocca la riga
+     * Il riquadro «Contatti»: tipo, email (o prefisso e numero), principale;
+     * etichetta e, per le aziende, «Si occupa di» stanno nelle informazioni
+     * avanzate della riga. La colonna dell'altro tipo la nasconde il
+     * framework (`visibleWhen('kind', …)`, lib 2.1.2-alpha.41): nascosta non
+     * si valida e non si posta. Lo script del modulo (`contactFormScript()`)
+     * spegne gli altri principali dello stesso tipo e blocca la riga
      * dell'email di accesso; senza script il server applica le stesse regole.
+     * Una scheda che ha già un contatto non resta senza: l'ultima riga non si
+     * elimina (`repeaterMinRows(1)`) e il server rifiuta un riquadro vuoto.
      *
      * @return list<Input>
      */
@@ -65,27 +70,32 @@ trait HasContactPoints
             FormField::key(static::$pointsInput)
                 ->repeater([
                     RepeaterColumn::key('kind')->select($kinds)->value(ContactPoints::EMAIL)->attribute('data-ca-point-kind')
-                        ->label((string) __t('contacts.point_kind'))->columnSpan(2),
+                        ->label((string) __t('contacts.point_kind'))->columnSpan(3),
                     RepeaterColumn::key('email')->email()->attribute('data-ca-point-only="email"')
-                        ->label((string) __t('contacts.point_kind_email'))->columnSpan(6),
+                        ->label((string) __t('contacts.point_kind_email'))->columnFill()
+                        ->visibleWhen('kind', ContactPoints::EMAIL),
                     RepeaterColumn::key('phone_prefix')->phonePrefix()->attribute('data-ca-point-only="phone"')
-                        ->label((string) __t('contacts.point_prefix'))->columnSpan(2),
+                        ->label((string) __t('contacts.point_prefix'))->columnSpan(2)
+                        ->visibleWhen('kind', ContactPoints::PHONE),
                     RepeaterColumn::key('phone')->tel()->attribute('data-ca-point-only="phone"')
-                        ->label((string) __t('contacts.point_kind_phone'))->columnSpan(4),
-                    RepeaterColumn::key('label')->select($labels)->value('')->attribute('data-ca-point-label')
-                        ->label((string) __t('contacts.point_label'))->columnSpan(2),
+                        ->label((string) __t('contacts.point_kind_phone'))->columnFill()
+                        ->visibleWhen('kind', ContactPoints::PHONE),
                     RepeaterColumn::key('is_primary')
                         ->select(['false' => (string) __t('contacts.no'), 'true' => (string) __t('contacts.yes')])->value('false')
                         ->attribute('data-ca-point-primary')
                         ->label((string) __t('contacts.point_primary'))->columnSpan(2),
+                    RepeaterColumn::key('label')->select($labels)->value('')->attribute('data-ca-point-label')
+                        ->label((string) __t('contacts.point_label'))->columnSpan($company ? 4 : 12),
                     ...($company ? [
                         RepeaterColumn::key('departments')->selectSearch(ContactRelations::departments(), true)
-                            ->label((string) __t('contacts.departments'))->columnSpan(12),
+                            ->label((string) __t('contacts.departments'))->columnSpan(8),
                     ] : []),
                     RepeaterColumn::key('locked')->hidden()->attribute('data-ca-point-locked'),
                 ])
                 ->nested()
-                ->repeaterSortable()
+                ->repeaterAdvanced('label', 'departments')
+                ->repeaterAdvancedLabel((string) __t($company ? 'contacts.point_advanced_company' : 'contacts.point_advanced'))
+                ->repeaterMinRows(1)
                 ->repeaterAddLabel((string) __t('contacts.point_add'))
                 ->label((string) __t('contacts.box_label')),
             FormField::key(static::$boxMarker)->hidden()->value('1'),
@@ -129,12 +139,12 @@ trait HasContactPoints
 
     /**
      * Lo script del riquadro e della ricerca per nome negli indirizzi, da
-     * mettere una volta nel layout del form (una stringa: la stampa il
-     * renderer del layout). Vuoto se la pagina l'ha già.
+     * mettere una volta nel layout del form. È un `RichText`: una stringa nei
+     * componenti di una card il layout la scarta senza dire niente.
      */
-    public static function contactFormScript(): string
+    public static function contactFormScript(): RichText
     {
-        return ContactFormScript::html();
+        return RichText::make(ContactFormScript::html())->tag('div')->columnSpan(12);
     }
 
     /** Il form mostra il riquadro «Contatti»? */
@@ -188,10 +198,28 @@ trait HasContactPoints
             throw new InvalidArgumentException(implode("\n", $split['problems']));
         }
 
+        // Una scheda che aveva un contatto non resta senza: l'ultimo si cambia, non si toglie.
+        if ($split['rows'] === [] && $split['kept'] === [] && static::hadContact($oldValues ?? [])
+            && ContactPoints::lockedEmail(static::contactPointOwner(), $oldValues ?? []) === null) {
+            throw new InvalidArgumentException((string) __t('contacts.point_required'));
+        }
+
         // Il riquadro vince sui campi singoli; un tipo che non tocca resta com'è (vedi `split()`).
         unset($values['email'], $values['phone_prefix'], $values['phone']);
 
         return $split['columns'] + $values;
+    }
+
+    /** La scheda salvata ha un'email o un telefono (l'email di accesso compresa)? */
+    protected static function hadContact(array $oldValues): bool
+    {
+        foreach (['email', 'phone'] as $column) {
+            if (is_scalar($oldValues[$column] ?? null) && trim((string) $oldValues[$column]) !== '') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

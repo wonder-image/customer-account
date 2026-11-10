@@ -143,7 +143,9 @@ check('form: il riquadro rimette il principale nelle colonne e vince sui campi s
             'r3' => ['kind' => 'phone', 'phone_prefix' => '+39', 'phone' => '02 1234567'],
         ],
     ], 'update', 'backend', Query::$tables['contacts'][2]);
-    $empty = ContactResource::mutateRequestValues($base + ['contact_points' => []], 'update', 'backend', Query::$tables['contacts'][2]);
+    // Una scheda che aveva contatti non resta senza: va cambiato l'ultimo, non tolto.
+    $empty = $reject(static fn () => ContactResource::mutateRequestValues($base + ['contact_points' => []], 'update', 'backend', Query::$tables['contacts'][2]));
+    $fresh = ContactResource::mutateRequestValues($base + ['contact_points' => []], 'store', 'backend', null);
     $duplicate = $reject(static fn () => ContactResource::mutateRequestValues($base + ['contact_points' => [
         ['kind' => 'email', 'email' => 'a@rossi.test'], ['kind' => 'email', 'email' => 'A@rossi.test'],
     ]], 'update', 'backend', Query::$tables['contacts'][2]));
@@ -155,7 +157,7 @@ check('form: il riquadro rimette il principale nelle colonne e vince sui campi s
 
     return $saved['email'] === 'nuova@rossi.test' && $saved['phone'] === '021234567' && $saved['phone_prefix'] === '+39'
         && !array_key_exists('contact_points', $saved) && !array_key_exists('contact_box_form', $saved)
-        && $empty['email'] === '' && $empty['phone'] === '' && $empty['phone_prefix'] === ''
+        && $empty === 'contacts.point_required' && $fresh['email'] === ''
         && $duplicate === 'contacts.point_duplicate' && $dns === 'contacts.point_email_invalid'
         && array_column(ContactPoints::of(ContactPoints::CONTACT, 2), 'value') === ['c@rossi.test'];
 });
@@ -307,8 +309,8 @@ check('Resource: riquadro con «Si occupa di» solo sulle aziende, script del mo
     };
     $script = ContactFormScript::html();
 
-    return $columns(ContactResource::class) === ['kind', 'email', 'phone_prefix', 'phone', 'label', 'is_primary', 'locked']
-        && $columns(CompanyResource::class) === ['kind', 'email', 'phone_prefix', 'phone', 'label', 'is_primary', 'departments', 'locked']
+    return $columns(ContactResource::class) === ['kind', 'email', 'phone_prefix', 'phone', 'is_primary', 'label', 'locked']
+        && $columns(CompanyResource::class) === ['kind', 'email', 'phone_prefix', 'phone', 'is_primary', 'label', 'departments', 'locked']
         && str_starts_with($script, '<script>') && substr_count($script, '</script>') === 1 && str_contains($script, 'caContactForm')
         && str_contains($script, 'data-ca-point-kind') && ContactResource::usesContactBox() && CompanyResource::usesContactBox();
 });

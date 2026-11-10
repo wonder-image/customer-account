@@ -8,6 +8,8 @@
 
 ### Breaking
 
+- `HasContactPoints::contactFormScript()` restituisce un `RichText` invece di una stringa: tra i componenti di una card la stringa veniva scartata senza dire niente e lo script non arrivava nella pagina. Chi lo concatena a un HTML usa `ContactFormScript::html()`.
+- Riquadro «Contatti»: richiede `wonder-image/app` con `repeaterMinRows()` (dopo `2.4.0-beta.6`) e la lib `2.1.2-alpha.41`. Le colonne per tipo le nasconde il framework (`visibleWhen('kind', …)`), non più lo script del modulo; etichetta e «Si occupa di» passano nelle informazioni avanzate della riga.
 - Le aziende non sono più schede di `contacts`: stanno in `companies` / `company_addresses` (`Company`, `CompanyAddress`, `CompanyResource` su `/backend/companies/`, `CompanyAddressResource`). `contacts` perde `type`, `business_name`, `pi`, `sdi`, `pec` e `is_supplier`; i fornitori sono sempre aziende.
 - `contact_relations.company_id` punta a `companies`. Ogni scheda ha un solo repeater: «Referenti» (`contact_people`) sulle aziende, «Aziende» (`contact_companies`) sulle persone.
 - `ContactRecord` passa a `SCHEMA` 2 con `entity` e `code`; gli id esterni usano `entity_type = contact` (prima `contacts`) e `company`.
@@ -25,6 +27,9 @@
 
 ### Fixed
 
+- Riquadro «Contatti»: cambiando il tipo restavano visibili sia l'email sia il telefono; etichetta e «Si occupa di» non si ripetono più su ogni riga a vista. Il prefisso vuoto parte da quello del paese del sito (con `wonder-image/app` aggiornato), e una riga mai toccata non conta come contatto.
+- Form del brand: la colonna dei domini email non ripete il titolo della card («Dominio» come etichetta) e nei social il bottone per eliminare la riga resta sulla stessa linea dell'indirizzo.
+- Le label doppie (card «Contatti» e repeater «Contatti») tolte dal form del brand.
 - Il «+» dei legami accetta il layout della finestra (quinto elemento di `relationQuickCreate()`): senza, una finestra con un campo che non è nel form del target (l'email, ora nel riquadro «Contatti») faceva andare in errore la scheda («Input resource non trovato»).
 - Email di accesso: `ContactResource::mutateRequestValues()` scarta l'`email` postata per una persona con account anche senza riquadro (`HasContactPoints::withoutAccessEmail()`, ereditato dalle sottoclassi); `ContactAccount::link()`, cambio email del pannello e registrazione non ne sono toccati (test).
 - Valori storici: un'email o un telefono principali che le regole di oggi non riconoscono si mostrano (il telefono prova a separare un prefisso noto) e, riportati com'erano o non postati, restano; prima aprire e salvare la scheda li svuotava. `split()` porta `kept`.
@@ -33,6 +38,12 @@
 - Script del riquadro: i campi dell'altro tipo nascosti si disabilitano (niente validazione del browser bloccante); un'email storica non accettata dal browser e lasciata com'è non blocca l'invio.
 
 ### Added
+
+- **Almeno un contatto**: una scheda che ne aveva già uno non resta senza (`repeaterMinRows(1)` a schermo, `contacts.point_required` sul server). Non vale in creazione né quando l'unico contatto è l'email di accesso.
+- **Brand: domini email e recapiti multipli.** Colonne `domains` e `contacts` (JSON) in `company_brands`; `BrandData::domains()`, `contacts()`, `domainsOf()`, `contactsOf()`, `MAX_DOMAINS`, `MAX_CONTACTS`. Le colonne singole `domain`, `email`, `phone_prefix`, `phone` tengono il primo valore delle liste; i brand di prima si leggono come prima. `CompanyBrands::byDomain()` guarda tutti i domini. Nei record del brand (`CompanyRecord`) `domains` e `contacts` in più, come liste: `SCHEMA` invariato, le chiavi di prima restano.
+- **Brand: settore e lingua da tendina.** Settore con le 21 sezioni ATECO 2025 / NACE Rev. 2.1 (`BrandData::SECTORS`, `sectors()`, `sector()`): un testo libero salvato prima resta nel database ma il form lo mostra vuoto finché non si sceglie una sezione. Lingua ISO 639-1 (`BrandData::LANGUAGES`, `languages()`, `addLanguage()`), default `it` (`DEFAULT_LANGUAGE`).
+- **Brand: colori con l'input HEX** del framework (repeater di `color()`) invece del testo separato da virgole; nel form `colors` sono righe `['color' => '#rrggbb']`.
+- Gli input del form del brand usano quelli specifici del framework: `url()`, `email()`, `tel()`, `phonePrefix()`, `color()`, `selectSearch()`.
 
 - Riquadro «Contatti» con «Principale» (persone e aziende): `HasContactPoints::contactBoxFields()`, `applyContactPoints()`, `usesContactBox()`, `contactFormScript()`; `ContactPoints::all()`, `formRows()`, `split()`, `syncAll()`, `lockedEmail()`, `cleanEmail()`, `ACCESS_LABEL`. Un principale per tipo (regola lato server), la prima riga se nessuna lo è, scambio senza perdere la vecchia principale. Una persona con account tiene `contacts.email` («Email di accesso», riga bloccata): il riquadro non la cambia e non promuove un'altra email.
 - «Si occupa di» sui contatti delle aziende: tabella `company_point_departments` (`Models\CompanyPointDepartment`, per valore, così l'area segue l'email quando cambia il principale), `ContactPoints::companyEmailsFor($companyId, $department = '')` per i destinatari a livello di azienda.
