@@ -5,11 +5,12 @@
 ### Changed
 
 - Richiede wonder-image/app `^2.4.0-beta.6`: la ricerca dell'indirizzo per nome dell'attività usa `AddressExtension::withNameSearch()`.
+- Richiede wonder-image/app `^2.4.0-beta.7` per `repeaterMinRows()` (almeno un contatto nel riquadro «Contatti»).
 
 ### Breaking
 
 - `HasContactPoints::contactFormScript()` restituisce un `RichText` invece di una stringa: tra i componenti di una card la stringa veniva scartata senza dire niente e lo script non arrivava nella pagina. Chi lo concatena a un HTML usa `ContactFormScript::html()`.
-- Riquadro «Contatti»: richiede `wonder-image/app` con `repeaterMinRows()` (dopo `2.4.0-beta.6`) e la lib `2.1.2-alpha.41`. Le colonne per tipo le nasconde il framework (`visibleWhen('kind', …)`), non più lo script del modulo; etichetta e «Si occupa di» passano nelle informazioni avanzate della riga.
+- Riquadro «Contatti»: richiede `wonder-image/app` `2.4.0-beta.7` (`repeaterMinRows()`) e la lib `2.1.2-alpha.41`. Le colonne per tipo le nasconde il framework (`visibleWhen('kind', …)`), non più lo script del modulo; etichetta e «Si occupa di» passano nelle informazioni avanzate della riga.
 - Le aziende non sono più schede di `contacts`: stanno in `companies` / `company_addresses` (`Company`, `CompanyAddress`, `CompanyResource` su `/backend/companies/`, `CompanyAddressResource`). `contacts` perde `type`, `business_name`, `pi`, `sdi`, `pec` e `is_supplier`; i fornitori sono sempre aziende.
 - `contact_relations.company_id` punta a `companies`. Ogni scheda ha un solo repeater: «Referenti» (`contact_people`) sulle aziende, «Aziende» (`contact_companies`) sulle persone.
 - `ContactRecord` passa a `SCHEMA` 2 con `entity` e `code`; gli id esterni usano `entity_type = contact` (prima `contacts`) e `company`.
