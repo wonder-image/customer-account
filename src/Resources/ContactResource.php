@@ -142,7 +142,8 @@ class ContactResource extends Resource
     {
         static::verifyFormToken($values);
         // Il riquadro «Contatti» rimette il principale nelle colonne; le altre righe le scrive `syncRepeaterRelations()`.
-        $values = static::applyContactPoints($values, $oldValues);
+        // Con un account l'email di accesso non si cambia da qui, con o senza riquadro: si scarta.
+        $values = static::applyContactPoints(static::withoutAccessEmail($values, $oldValues), $oldValues);
         // I contatti di lavoro dei referenti: il repeater non arriva qui (lo toglie `stripRelationInputValues()`).
         static::assertRelationContacts($_POST);
         $geo = static::postedGeo($values);

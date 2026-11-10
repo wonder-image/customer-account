@@ -150,6 +150,57 @@ check('record: i legami portano i contatti di lavoro; validate rifiuta un\'email
         && CompanyRecord::validate(['business_name' => 'X', 'relations' => [['person_id' => 2, 'work_email' => 'rotta'], ['person_id' => 3, 'work_email' => 'ok@rossi.test']]]) === ['relations.0' => 'invalid'];
 });
 
+check('visibilità ristretta: il legame con una controparte non visibile resta com\'era (contatti di lavoro, mansione, flag, accesso, aree)', function () use ($tables) {
+    $seed = $tables();
+    $seed['contact_relations'] = [
+        1 => ['id' => 1, 'company_id' => 1, 'person_id' => 2, 'job_title' => 'Acquisti', 'is_primary' => 'false', 'receives_documents' => 'false', 'access' => 'none', 'email' => 'anna@rossi.test', 'phone_prefix' => '', 'phone' => '', 'position' => 1, 'deleted' => 'false'],
+        2 => ['id' => 2, 'company_id' => 4, 'person_id' => 2, 'job_title' => 'Amministrazione', 'is_primary' => 'true', 'receives_documents' => 'true', 'access' => 'buyer', 'email' => 'anna@neri.test', 'phone_prefix' => '+39', 'phone' => '021234567', 'position' => 2, 'deleted' => 'false'],
+    ];
+    $seed['contact_relation_departments'] = [1 => ['id' => 1, 'relation_id' => 2, 'department' => 'administration', 'deleted' => 'false']];
+    Query::reset($seed);
+    // Chi scrive vede l'azienda 1, non la 4.
+    ContactRelations::useCounterpartFilter(static fn (string $model, array $ids): array => array_values(array_diff($ids, [4])));
+    try {
+        ContactRelations::sync(ContactRelations::PERSON, 2, [
+            ['company_id' => '1', 'job_title' => 'Ordini', 'email' => 'anna.ordini@rossi.test'],
+            ['company_id' => '4', 'job_title' => 'X', 'is_primary' => 'false', 'receives_documents' => 'false', 'access' => 'admin',
+                'email' => 'dirottata@evil.test', 'phone' => '0000000', 'departments' => ['sales'], 'brand_ids' => ['9']],
+        ]);
+    } finally {
+        ContactRelations::useCounterpartFilter(null);
+    }
+    $hidden = Query::$tables['contact_relations'][2];
+    $seen = Query::$tables['contact_relations'][1];
+
+    return $hidden['email'] === 'anna@neri.test' && $hidden['phone'] === '021234567' && $hidden['job_title'] === 'Amministrazione'
+        && $hidden['is_primary'] === 'true' && $hidden['receives_documents'] === 'true' && $hidden['access'] === 'buyer' && $hidden['deleted'] === 'false'
+        && ContactRelations::departmentsOf(2) === ['administration'] && ContactRelations::brandsOf(2) === []
+        && $seen['email'] === 'anna.ordini@rossi.test' && $seen['job_title'] === 'Ordini';
+});
+
+check('visibilità ristretta dal lato azienda: il principale non visibile tiene il titolo; senza filtro tutto come prima', function () use ($tables) {
+    $seed = $tables();
+    $seed['contact_relations'] = [
+        1 => ['id' => 1, 'company_id' => 1, 'person_id' => 3, 'job_title' => '', 'is_primary' => 'true', 'receives_documents' => 'false', 'access' => 'none', 'email' => 'luca@rossi.test', 'phone_prefix' => '', 'phone' => '', 'position' => 1, 'deleted' => 'false'],
+    ];
+    Query::reset($seed);
+    ContactRelations::useCounterpartFilter(static fn (string $model, array $ids): array => array_values(array_diff($ids, [3])));
+    try {
+        ContactRelations::sync(ContactRelations::COMPANY, 1, [
+            ['person_id' => '2', 'is_primary' => 'true'],
+            ['person_id' => '3', 'is_primary' => 'false', 'email' => 'altro@evil.test'],
+        ]);
+    } finally {
+        ContactRelations::useCounterpartFilter(null);
+    }
+    $byPerson = array_column(Query::$tables['contact_relations'], null, 'person_id');
+    $filtered = $byPerson[3]['is_primary'] === 'true' && $byPerson[3]['email'] === 'luca@rossi.test' && $byPerson[2]['is_primary'] === 'false';
+    ContactRelations::sync(ContactRelations::COMPANY, 1, [['person_id' => '2', 'is_primary' => 'true'], ['person_id' => '3', 'email' => 'luca.nuova@rossi.test']]);
+    $byPerson = array_column(Query::$tables['contact_relations'], null, 'person_id');
+
+    return $filtered && $byPerson[3]['email'] === 'luca.nuova@rossi.test' && $byPerson[3]['is_primary'] === 'false' && $byPerson[2]['is_primary'] === 'true';
+});
+
 // Vincolo di sicurezza: l'email di lavoro non è mai un'email di accesso.
 $GLOBALS['__fake_users'] = [['id' => 7, 'email' => 'luca@rossi.test', 'name' => 'Luca', 'surname' => 'Verdi']];
 

@@ -47,8 +47,10 @@ final class ContactRelations
      * riga (il commerciale vede solo le sue): `fn(string $modelClass, list<int>
      * $ids): list<int>` dà gli id ammessi fra quelli dati. In scrittura una
      * controparte non ammessa si scarta, ma una già legata resta (chi non la
-     * vede non la stacca salvando); in lettura le scelte del repeater sono le
-     * ammesse più quelle già legate. `null` (il default) = tutte.
+     * vede non la stacca salvando), ma in sola lettura: mansione, principale,
+     * documenti, accesso, contatti di lavoro, aree e brand seguiti restano
+     * quelli salvati, qualunque cosa arrivi (`sync()`); in lettura le scelte
+     * del repeater sono le ammesse più quelle già legate. `null` (il default) = tutte.
      */
     public static function useCounterpartFilter(?callable $filter): void
     {
@@ -849,6 +851,32 @@ final class ContactRelations
         $before = self::liveByCounterpart($parentColumn, $parentId);
         $valid = self::existingCounterparts($parentColumn, array_map(static fn (array $row): int => self::id($row[$other] ?? 0), $rows), $parentId);
         $clean = self::normalize($rows, self::allRowsOf($parentColumn, $parentId), $parentColumn, $parentId, $valid);
+        $readonly = self::readonlyCounterparts($parentColumn, array_map(static fn (array $row): int => (int) $row[$other], $clean));
+
+        // Una controparte che chi scrive non vede resta com'era: nessun campo del legame arriva dal POST.
+        if ($readonly !== []) {
+            $primaryKept = false;
+
+            foreach ($clean as $i => $row) {
+                $counterpartId = (int) $row[$other];
+
+                if (isset($readonly[$counterpartId], $before[$counterpartId])) {
+                    $clean[$i] = self::storedClean($before[$counterpartId], $other);
+                    $primaryKept = $primaryKept || $clean[$i]['is_primary'] === 'true';
+                    unset($brands[$counterpartId], $areas[$counterpartId]);
+                }
+            }
+
+            // Dal lato azienda un principale salvato e non visibile tiene il titolo.
+            if ($primaryKept && $parentColumn === self::COMPANY) {
+                foreach ($clean as $i => $row) {
+                    if (!isset($readonly[(int) $row[$other]])) {
+                        $clean[$i]['is_primary'] = 'false';
+                    }
+                }
+            }
+        }
+
         $relation = RepeaterRelation::make(ContactRelation::$table, $parentColumn)
             ->model(ContactRelation::class)
             ->positionKey('position')
@@ -857,7 +885,7 @@ final class ContactRelations
 
         if ($parentColumn === self::PERSON) {
             foreach ($clean as $row) {
-                if ($row['is_primary'] === 'true') {
+                if ($row['is_primary'] === 'true' && !isset($readonly[(int) $row[self::COMPANY]])) {
                     self::demoteOtherPrimaries((int) $row[self::COMPANY], $parentId);
                 }
             }
@@ -1013,6 +1041,45 @@ final class ContactRelations
         }
 
         return $out;
+    }
+
+    /**
+     * Le controparti delle righe che chi scrive non vede: con un filtro
+     * (`useCounterpartFilter()`) quelle non ammesse. Sono già legate
+     * (`existingCounterparts()` scarta le altre): il loro legame è in sola
+     * lettura. Senza filtro nessuna.
+     *
+     * @param list<int> $ids
+     * @return array<int, true>
+     */
+    private static function readonlyCounterparts(string $parentColumn, array $ids): array
+    {
+        if (self::$counterpartFilter === null || $ids === []) {
+            return [];
+        }
+
+        return array_fill_keys(array_values(array_diff($ids, self::allowedCounterparts($parentColumn, $ids))), true);
+    }
+
+    /**
+     * Una riga salvata nella forma di `normalize()`, per un legame in sola lettura.
+     *
+     * @return array<string, mixed>
+     */
+    private static function storedClean(array $stored, string $other): array
+    {
+        return [
+            'id' => (int) $stored['id'],
+            $other => (int) $stored[$other],
+            'job_title' => (string) ($stored['job_title'] ?? ''),
+            'is_primary' => self::flag($stored['is_primary'] ?? 'false'),
+            'receives_documents' => self::flag($stored['receives_documents'] ?? 'false'),
+            'access' => self::access($stored['access'] ?? null),
+            'email' => (string) ($stored['email'] ?? ''),
+            'phone_prefix' => (string) ($stored['phone_prefix'] ?? ''),
+            'phone' => (string) ($stored['phone'] ?? ''),
+            'deleted' => 'false',
+        ];
     }
 
     /** @return array<int, array<string, mixed>> le righe vive per id della controparte */

@@ -49,7 +49,11 @@ Le convenzioni del framework sono in `vendor/wonder-image/app/AGENTS.md`.
   JS. La Resource chiama `applyContactPoints()` in `mutateRequestValues()`.
   Senza marker i campi singoli si salvano come prima. Una persona con
   account (`user_id`) tiene `contacts.email`: il riquadro non la cambia
-  (`lockedEmail()`). Il collegamento account↔scheda e ogni ricerca della
+  (`lockedEmail()`), e `ContactResource::mutateRequestValues()` ne scarta
+  l'`email` postata anche senza riquadro (`withoutAccessEmail()`). Un valore
+  storico non riconosciuto non si perde senza un gesto (`split()` → `kept`).
+  Aree dei contatti: niente orfane (`dropOrphanDepartments()`), quelle non
+  più note non valgono «tutto». Il collegamento account↔scheda e ogni ricerca della
   scheda per email usano solo `contacts.email`: mai un contatto in più né
   un'email di lavoro dei referenti (ci sono i test).
 - Contatti di lavoro del referente su `contact_relations` (`email`,
@@ -68,7 +72,9 @@ Le convenzioni del framework sono in `vendor/wonder-image/app/AGENTS.md`.
   `CompanyBrands::byDomain()` non riconosce mai una casella generica né un
   social, ed è solo un suggerimento: mai per agganciare account o dati.
 - Visibilità per riga: `ContactRelations::useCounterpartFilter()` /
-  `useAccessGuard()` (di serie spenti); un legame solo con `attach()`.
+  `useAccessGuard()` (di serie spenti); un legame solo con `attach()`. Con il
+  filtro, il legame con una controparte non visibile è in sola lettura in
+  `sync()` (tutti i campi, contatti di lavoro compresi).
 - Le email si salvano con il solo controllo di formato (niente DNS in
   scrittura); il DNS solo nella validazione del form.
 - Indirizzi: fatturazione e consegna con `withGeo()` e `withNameSearch()`;

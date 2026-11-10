@@ -7,6 +7,7 @@ use Wonder\App\Support\GoogleMaps;
 use Wonder\Auth\Frontend\AccountAddressValidation;
 use Wonder\Plugin\CustomerAccount\Models\Company;
 use Wonder\Plugin\CustomerAccount\Models\Contact;
+use Wonder\Plugin\CustomerAccount\Support\ContactPoints;
 
 /** Dati di fatturazione della scheda del cliente. */
 final class AccountBilling
@@ -40,6 +41,11 @@ final class AccountBilling
             return (object) ['success' => false, 'messages' => $messages];
         }
         $result = $model::update($values, $id);
+
+        // Il telefono dell'azienda può essere cambiato: le aree del valore vecchio non restano a nessuno.
+        if ($model === Company::class && ($result->success ?? false)) {
+            ContactPoints::dropOrphanDepartments($id);
+        }
 
         return ($result->success ?? false)
             ? (object) ['success' => true, 'messages' => []]

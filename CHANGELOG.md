@@ -23,6 +23,14 @@
 - `ContactRelations::normalize()` porta anche `email`, `phone_prefix`, `phone` (i contatti di lavoro); le righe di `peopleOf()` / `peopleFor()` / `companiesOf()` portano in più le colonne del legame `email` / `phone_prefix` / `phone` (di lavoro: la persona resta sotto `contact`), `work_*` e `contact_email`.
 - I messaggi dei contatti non validi iniziano con «Contatti:» e non più «Altri contatti:».
 
+### Fixed
+
+- Email di accesso: `ContactResource::mutateRequestValues()` scarta l'`email` postata per una persona con account anche senza riquadro (`HasContactPoints::withoutAccessEmail()`, ereditato dalle sottoclassi); `ContactAccount::link()`, cambio email del pannello e registrazione non ne sono toccati (test).
+- Valori storici: un'email o un telefono principali che le regole di oggi non riconoscono si mostrano (il telefono prova a separare un prefisso noto) e, riportati com'erano o non postati, restano; prima aprire e salvare la scheda li svuotava. `split()` porta `kept`.
+- Aree dei contatti delle aziende: si tolgono quelle di valori che non sono più contatti a ogni scrittura del modulo, un contatto nuovo non eredita quelle rimaste (`ContactPoints::dropOrphanDepartments()` per chi scrive da fuori); una casella con sole aree non più note non si occupa più «di tutto» in `companyEmailsFor()`, e il form non le toglie.
+- Legami con una controparte non visibile (filtro delle controparti): in sola lettura in `sync()`, contatti di lavoro compresi.
+- Script del riquadro: i campi dell'altro tipo nascosti si disabilitano (niente validazione del browser bloccante); un'email storica non accettata dal browser e lasciata com'è non blocca l'invio.
+
 ### Added
 
 - Riquadro «Contatti» con «Principale» (persone e aziende): `HasContactPoints::contactBoxFields()`, `applyContactPoints()`, `usesContactBox()`, `contactFormScript()`; `ContactPoints::all()`, `formRows()`, `split()`, `syncAll()`, `lockedEmail()`, `cleanEmail()`, `ACCESS_LABEL`. Un principale per tipo (regola lato server), la prima riga se nessuna lo è, scambio senza perdere la vecchia principale. Una persona con account tiene `contacts.email` («Email di accesso», riga bloccata): il riquadro non la cambia e non promuove un'altra email.

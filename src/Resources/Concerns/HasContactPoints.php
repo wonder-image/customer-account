@@ -188,9 +188,29 @@ trait HasContactPoints
             throw new InvalidArgumentException(implode("\n", $split['problems']));
         }
 
-        unset($values['email']);
+        // Il riquadro vince sui campi singoli; un tipo che non tocca resta com'è (vedi `split()`).
+        unset($values['email'], $values['phone_prefix'], $values['phone']);
 
         return $split['columns'] + $values;
+    }
+
+    /**
+     * L'email di accesso non si cambia dai form del backend: se la scheda
+     * salvata (`$oldValues`, dal database) è di una persona con un account
+     * (`ContactPoints::lockedEmail()`), l'`email` postata si scarta, con o
+     * senza riquadro. La riscrivono solo l'account (`ContactAccount::link()`,
+     * il cambio email del pannello, la registrazione), che non passano dalle
+     * Resource. `ContactResource::mutateRequestValues()` lo chiama sempre (e
+     * così le Resource che la estendono); chi ha un suo `mutateRequestValues()`
+     * lo chiama o applica una regola sua (il gestionale rifiuta il cambio).
+     */
+    protected static function withoutAccessEmail(array $values, ?array $oldValues): array
+    {
+        if (ContactPoints::lockedEmail(static::contactPointOwner(), $oldValues ?? []) !== null) {
+            unset($values['email']);
+        }
+
+        return $values;
     }
 
     /**
@@ -224,6 +244,11 @@ trait HasContactPoints
         }
 
         if (!isset($post[static::$pointsMarker])) {
+            // I campi singoli possono aver cambiato l'email principale: le aree del valore vecchio non restano a nessuno.
+            if (static::contactPointOwner() === ContactPoints::COMPANY) {
+                ContactPoints::dropOrphanDepartments($parentId);
+            }
+
             return null;
         }
 

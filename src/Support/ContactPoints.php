@@ -134,10 +134,11 @@ final class ContactPoints
 
     /**
      * Tutte le righe del riquadro «Contatti»: prima l'email e il telefono
-     * principali (dalle colonne della scheda), poi gli altri nell'ordine
-     * scelto. Ogni riga ha `is_primary`, `locked` (l'email di accesso di una
-     * persona con account, etichetta `access`) e `departments` (le aree, solo
-     * per le aziende; vuota = tutto).
+     * principali (dalle colonne della scheda; un valore storico che le
+     * regole di oggi non riconoscono si mostra grezzo, vedi `split()`), poi
+     * gli altri nell'ordine scelto. Ogni riga ha `is_primary`, `locked` (l'email di accesso di una
+     * persona con account, etichetta `access`) e `departments` (le aree note,
+     * solo per le aziende; vuota = tutto).
      *
      * @param array<string, mixed>|null $card la scheda, se chi chiama l'ha già letta
      * @return list<array{kind: string, value: string, phone_prefix: string, label: string, is_primary: bool, locked: bool, departments: list<string>}>
@@ -160,18 +161,18 @@ final class ContactPoints
 
         foreach (self::primaryRows($card) as $row) {
             $isLocked = $row['kind'] === self::EMAIL && $locked !== null;
-            $out[] = $row + [
+            $out[] = array_diff_key($row, ['valid' => true]) + [
                 'label' => $isLocked ? self::ACCESS_LABEL : '',
                 'is_primary' => true,
                 'locked' => $isLocked,
-                'departments' => $areas[$row['kind'].'|'.$row['value']] ?? [],
+                'departments' => self::knownDepartments($areas[$row['kind'].'|'.$row['value']] ?? []),
             ];
         }
 
         $points = RequestMemo::remember($model::$table, 'owner:'.$ownerId, static fn (): array => self::of($owner, $ownerId));
 
         foreach ($points as $row) {
-            $out[] = $row + ['is_primary' => false, 'locked' => false, 'departments' => $areas[$row['kind'].'|'.$row['value']] ?? []];
+            $out[] = $row + ['is_primary' => false, 'locked' => false, 'departments' => self::knownDepartments($areas[$row['kind'].'|'.$row['value']] ?? [])];
         }
 
         return $out;
@@ -276,15 +277,30 @@ final class ContactPoints
      * le altre email restano righe normali e `columns` non porta `email`.
      * Le colonne `locked` e `label = access` postate non contano.
      *
+     * Un valore salvato non si perde senza un gesto dell'utente: se il
+     * principale di un tipo è un valore storico che le regole di oggi non
+     * riconoscono (`all()` lo mostra grezzo) e il form lo riposta com'era, o
+     * non posta nessuna riga di quel tipo, le colonne di quel tipo restano come
+     * sono (`kept`) e le altre righe del tipo sono righe normali; nessun
+     * problema per quella riga. Toglierla o cambiarla è il gesto.
+     *
      * @param list<mixed> $rows
      * @param array<string, mixed> $card la scheda salvata (`user_id`, `email`); vuota per una scheda nuova
-     * @return array{columns: array<string, string>, rows: list<array<string, mixed>>, problems: list<string>}
+     * @return array{columns: array<string, string>, rows: list<array<string, mixed>>, problems: list<string>, kept: list<string>}
      */
     public static function split(string $owner, array $rows, array $card = [], bool $checkDomain = false): array
     {
         self::model($owner);
         $locked = self::lockedEmail($owner, $card);
+        $stored = [];
+
+        foreach (self::primaryRows($card) as $row) {
+            $stored[$row['kind']] = $row;
+        }
+
         $kept = [];
+        $keep = [];
+        $posted = [];
         $seen = [];
         $problems = [];
 
@@ -293,7 +309,23 @@ final class ContactPoints
                 continue;
             }
 
-            [$clean, $problem] = self::cleanRow(self::boxRow($row), $checkDomain);
+            $box = self::boxRow($row);
+            $raw = is_scalar($box['value']) ? trim((string) $box['value']) : '';
+
+            if ($raw === '') {
+                continue;
+            }
+
+            $kind = $box['kind'] ?? (str_contains($raw, '@') ? self::EMAIL : self::PHONE);
+            $posted[$kind] = true;
+
+            // Il valore storico riportato com'era: si tiene, valido o no.
+            if (isset($stored[$kind]) && !$stored[$kind]['valid'] && self::sameValue($kind, $raw, (string) $stored[$kind]['value'])) {
+                $keep[$kind] = true;
+                continue;
+            }
+
+            [$clean, $problem] = self::cleanRow($box, $checkDomain);
 
             if ($problem !== null) {
                 $problems[] = $problem;
@@ -320,17 +352,24 @@ final class ContactPoints
             $kept[] = $clean;
         }
 
+        foreach ($stored as $kind => $row) {
+            if (!$row['valid'] && !isset($posted[$kind])) {
+                $keep[$kind] = true;
+            }
+        }
+
         $columns = [];
 
         foreach (self::KINDS as $kind) {
             $primary = null;
+            $untouched = isset($keep[$kind]) || ($kind === self::EMAIL && $locked !== null);
 
             foreach ($kept as $i => $row) {
                 if ($row['kind'] !== $kind) {
                     continue;
                 }
 
-                if ($kind === self::EMAIL && $locked !== null) {
+                if ($untouched) {
                     $kept[$i]['is_primary'] = false;
                     continue;
                 }
@@ -342,7 +381,7 @@ final class ContactPoints
                 $kept[$i]['is_primary'] = false;
             }
 
-            if ($kind === self::EMAIL && $locked !== null) {
+            if ($untouched) {
                 continue;
             }
 
@@ -370,7 +409,7 @@ final class ContactPoints
             }
         }
 
-        return ['columns' => $columns, 'rows' => $kept, 'problems' => $problems];
+        return ['columns' => $columns, 'rows' => $kept, 'problems' => $problems, 'kept' => array_keys($keep)];
     }
 
     /**
@@ -412,11 +451,12 @@ final class ContactPoints
         [$wanted] = self::clean($rows, $card);
 
         return Transaction::run(static function () use ($owner, $model, $ownerId, $card, $wanted): array {
+            $before = $owner === self::COMPANY ? self::currentKeys($owner, $ownerId, $card) : [];
             self::writePoints($model, $ownerId, $wanted);
 
             if ($owner === self::COMPANY) {
-                // Le aree dei contatti tolti se ne vanno con loro.
-                self::writeDepartments($ownerId, [...self::primaryRows($card), ...$wanted]);
+                // Le aree dei contatti tolti se ne vanno con loro; un contatto nuovo non eredita quelle rimaste.
+                self::writeDepartments($ownerId, [...self::primaryRows($card), ...$wanted], $before);
             }
 
             return $wanted;
@@ -447,6 +487,7 @@ final class ContactPoints
         $split = self::split($owner, $rows, $card);
 
         Transaction::run(static function () use ($owner, $model, $ownerModel, $ownerId, $card, $split): void {
+            $before = $owner === self::COMPANY ? self::currentKeys($owner, $ownerId, $card) : [];
             $changes = array_filter(
                 $split['columns'],
                 static fn (string $value, string $column): bool => (string) ($card[$column] ?? '') !== $value,
@@ -461,7 +502,8 @@ final class ContactPoints
             self::writePoints($model, $ownerId, array_map([self::class, 'shape'], $others));
 
             if ($owner === self::COMPANY) {
-                self::writeDepartments($ownerId, $split['rows']);
+                $untouched = array_values(array_filter(self::primaryRows($card), static fn (array $row): bool => in_array($row['kind'], $split['kept'], true)));
+                self::writeDepartments($ownerId, [...$split['rows'], ...$untouched], $before);
             }
         });
 
@@ -471,7 +513,9 @@ final class ContactPoints
     /**
      * Le email di un'azienda a cui scrivere per un'area: quelle che se ne
      * occupano o si occupano di tutto (nessuna area), la principale per
-     * prima. Area vuota = tutte le email. Per i destinatari dei documenti,
+     * prima. Area vuota = tutte le email. Una casella con sole aree non più
+     * note (tolte dalla lista) non si occupa di nessuna area: esce solo con
+     * l'area vuota. Per i destinatari dei documenti,
      * accanto ai referenti di `ContactRelations::peopleFor()`.
      *
      * @return list<string>
@@ -480,18 +524,54 @@ final class ContactPoints
     {
         $department = trim($department);
         $out = [];
+        // Le aree salvate, anche quelle non più note: una casella che ne ha solo di sconosciute non si occupa «di tutto».
+        $areas = self::departmentsByValue($companyId);
 
         foreach (self::all(self::COMPANY, $companyId) as $row) {
             if ($row['kind'] !== self::EMAIL || $row['value'] === '') {
                 continue;
             }
 
-            if ($department === '' || $row['departments'] === [] || in_array($department, $row['departments'], true)) {
+            $stored = $areas[$row['kind'].'|'.$row['value']] ?? [];
+
+            if ($department === '' || $stored === [] || in_array($department, $stored, true)) {
                 $out[] = $row['value'];
             }
         }
 
         return array_values(array_unique($out));
+    }
+
+    /**
+     * Toglie le aree rimaste su valori che non sono più contatti dell'azienda
+     * (l'email principale cambiata dai campi singoli, da un import, da un altro
+     * modulo): senza, una casella aggiunta poi con quel valore le erediterebbe.
+     * Le scritture del modulo che cambiano i contatti di un'azienda lo fanno
+     * da sé (`sync()`, `syncAll()`, il salvataggio delle Resource senza
+     * riquadro, `AccountBilling::saveCompany()`); chi cambia `companies.email`
+     * o `phone` da fuori lo chiama dopo.
+     *
+     * @return int le righe tolte
+     */
+    public static function dropOrphanDepartments(int $companyId): int
+    {
+        $card = $companyId > 0 ? CompanyPoint::ownerModel()::findById($companyId) : null;
+
+        if (!is_array($card) || !isset($card['id'])) {
+            return 0;
+        }
+
+        $current = self::currentKeys(self::COMPANY, $companyId, $card);
+        $dropped = 0;
+
+        foreach (self::rows(CompanyPointDepartment::find(['company_id' => $companyId])) as $row) {
+            if (!isset($current[$row['kind'].'|'.$row['value']])) {
+                CompanyPointDepartment::delete((int) $row['id']);
+                $dropped++;
+            }
+        }
+
+        return $dropped;
     }
 
     /** L'email in minuscolo, senza spazi intorno. */
@@ -626,22 +706,114 @@ final class ContactPoints
     }
 
     /**
-     * L'email e il telefono principali di una scheda come righe.
+     * L'email e il telefono principali di una scheda come righe. Un valore
+     * salvato che le regole di oggi non riconoscono (dati storici: un telefono
+     * con lettere, un'email con uno spazio) resta, grezzo, con `valid` falso:
+     * non si perde senza un gesto dell'utente (`split()`). Il telefono prova
+     * prima a separare un prefisso noto (`+39 333…`, `0039333…`).
      *
-     * @return list<array{kind: string, value: string, phone_prefix: string}>
+     * @return list<array{kind: string, value: string, phone_prefix: string, valid: bool}>
      */
     private static function primaryRows(array $card): array
     {
         $out = [];
-        $email = self::email($card['email'] ?? '');
-        $phone = self::phoneNumber($card['phone'] ?? '');
+        $raw = is_scalar($card['email'] ?? null) ? trim((string) $card['email']) : '';
 
-        if ($email !== '') {
-            $out[] = ['kind' => self::EMAIL, 'value' => $email, 'phone_prefix' => ''];
+        if ($raw !== '') {
+            $valid = self::emailFormat(strtolower($raw));
+            $out[] = ['kind' => self::EMAIL, 'value' => $valid ? strtolower($raw) : $raw, 'phone_prefix' => '', 'valid' => $valid];
         }
 
-        if ($phone !== null && $phone !== '') {
-            $out[] = ['kind' => self::PHONE, 'value' => $phone, 'phone_prefix' => (string) (self::phonePrefix($card['phone_prefix'] ?? '') ?? '')];
+        $raw = is_scalar($card['phone'] ?? null) ? trim((string) $card['phone']) : '';
+
+        if ($raw !== '') {
+            [$prefix, $number] = self::storedPhone($card['phone_prefix'] ?? '', $raw);
+            $valid = $prefix !== null && $number !== null && $number !== '';
+            $out[] = [
+                'kind' => self::PHONE,
+                'value' => $valid ? $number : $raw,
+                'phone_prefix' => $valid ? $prefix : (is_scalar($card['phone_prefix'] ?? null) ? trim((string) $card['phone_prefix']) : ''),
+                'valid' => $valid,
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Prefisso e numero di un telefono salvato: senza prefisso nella sua
+     * colonna, un numero che inizia con `+` o `00` e un prefisso noto del
+     * framework (`phonePrefix()`) si divide. Null dove il valore non va.
+     *
+     * @return array{0: string|null, 1: string|null}
+     */
+    private static function storedPhone(mixed $prefix, string $raw): array
+    {
+        $prefix = self::phonePrefix($prefix);
+        $compact = (string) preg_replace('/[\s\-.\/()]+/', '', $raw);
+
+        if (($prefix === null || $prefix === '') && preg_match('/^(?:\+|00)(\d+)$/', $compact, $match) === 1) {
+            foreach (self::knownPrefixes() as $digits) {
+                $rest = substr($match[1], strlen($digits));
+
+                if (str_starts_with($match[1], $digits) && preg_match('/^\d{4,20}$/', $rest) === 1) {
+                    return ['+'.$digits, $rest];
+                }
+            }
+        }
+
+        return [$prefix, self::phoneNumber($raw)];
+    }
+
+    /**
+     * I prefissi noti del framework (`phonePrefix()` del core), solo cifre, dal
+     * più lungo. Vuoto se il core non li dà (comandi, test).
+     *
+     * @return list<string>
+     */
+    private static function knownPrefixes(): array
+    {
+        if (!function_exists('phonePrefix')) {
+            return [];
+        }
+
+        $out = [];
+
+        foreach (array_keys((array) \phonePrefix()) as $key) {
+            if (preg_match('/^\+(\d{1,4})$/', (string) $key, $match) === 1) {
+                $out[] = $match[1];
+            }
+        }
+
+        $out = array_values(array_unique($out));
+        usort($out, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
+
+        return $out;
+    }
+
+    /** Lo stesso valore a meno di maiuscole (email) o di spazi e trattini (telefono). */
+    private static function sameValue(string $kind, string $a, string $b): bool
+    {
+        if ($kind === self::EMAIL) {
+            return strtolower(trim($a)) === strtolower(trim($b));
+        }
+
+        $compact = static fn (string $value): string => (string) preg_replace('/[\s\-.\/()]+/', '', $value);
+
+        return $compact($a) === $compact($b);
+    }
+
+    /**
+     * I contatti di oggi di una scheda (`kind|value`): principali e in più.
+     *
+     * @return array<string, true>
+     */
+    private static function currentKeys(string $owner, int $ownerId, array $card): array
+    {
+        $out = [];
+
+        foreach ([...self::primaryRows($card), ...self::of($owner, $ownerId)] as $row) {
+            $out[$row['kind'].'|'.$row['value']] = true;
         }
 
         return $out;
@@ -684,14 +856,19 @@ final class ContactPoints
 
     /**
      * Le aree dei contatti di un'azienda: per le righe con `departments`
-     * (lista) le scrive, quelle con `null` o senza la chiave restano come
-     * sono; le aree di un valore che non c'è più fra `$rows` si tolgono.
+     * (lista) le scrive; quelle senza la chiave tengono le aree di prima, ma
+     * solo se il valore era già un contatto (`$before`): uno nuovo non eredita
+     * le aree rimaste su quel valore. Le aree non più note non si vedono nel
+     * form e non si possono togliere da lì: restano finché il contatto resta.
+     * Le aree di un valore che non c'è più fra `$rows` si tolgono.
      *
      * @param list<array<string, mixed>> $rows tutti i contatti dell'azienda, principali compresi
+     * @param array<string, true>|null $before i contatti prima della scrittura (`kind|value`); null = tutti
      */
-    private static function writeDepartments(int $companyId, array $rows): void
+    private static function writeDepartments(int $companyId, array $rows, ?array $before = null): void
     {
         $current = [];
+        $known = ContactRelations::departments();
 
         foreach (self::rows(CompanyPointDepartment::find(['company_id' => $companyId])) as $row) {
             $current[$row['kind'].'|'.$row['value']][(string) $row['department']] = (int) $row['id'];
@@ -701,12 +878,24 @@ final class ContactPoints
             $key = $row['kind'].'|'.$row['value'];
             $stored = $current[$key] ?? [];
             unset($current[$key]);
+            $existed = $before === null || isset($before[$key]);
+            $wanted = $row['departments'] ?? null;
 
-            if (!is_array($row['departments'] ?? null)) {
-                continue;
+            if (!is_array($wanted)) {
+                if ($existed) {
+                    continue;
+                }
+
+                $wanted = [];
             }
 
-            foreach ($row['departments'] as $department) {
+            foreach (array_keys($stored) as $department) {
+                if ($existed && !isset($known[$department])) {
+                    $wanted[] = $department;
+                }
+            }
+
+            foreach ($wanted as $department) {
                 if (!isset($stored[$department])) {
                     $result = CompanyPointDepartment::create(['company_id' => $companyId, 'kind' => $row['kind'], 'value' => $row['value'], 'department' => $department]);
 
@@ -717,7 +906,7 @@ final class ContactPoints
             }
 
             foreach ($stored as $department => $id) {
-                if (!in_array($department, $row['departments'], true)) {
+                if (!in_array($department, $wanted, true)) {
                     CompanyPointDepartment::delete($id);
                 }
             }
@@ -731,8 +920,8 @@ final class ContactPoints
     }
 
     /**
-     * Le aree dei contatti di un'azienda, per `kind|value`, in una query.
-     * Solo le aree note: una tolta dalla lista non conta più.
+     * Le aree salvate dei contatti di un'azienda, per `kind|value`, in una
+     * query, comprese quelle non più note (le filtra `knownDepartments()`).
      *
      * @return array<string, list<string>>
      */
@@ -747,16 +936,23 @@ final class ContactPoints
                 return $out;
             }
 
-            $known = ContactRelations::departments();
-
             foreach ($rows as $row) {
-                if (isset($known[(string) $row['department']])) {
-                    $out[$row['kind'].'|'.$row['value']][] = (string) $row['department'];
-                }
+                $out[$row['kind'].'|'.$row['value']][] = (string) $row['department'];
             }
 
             return $out;
         });
+    }
+
+    /**
+     * @param list<string> $departments
+     * @return list<string> solo le aree note
+     */
+    private static function knownDepartments(array $departments): array
+    {
+        $known = ContactRelations::departments();
+
+        return array_values(array_filter($departments, static fn (string $department): bool => isset($known[$department])));
     }
 
     /** @return array{kind: string, value: string, phone_prefix: string, label: string} */

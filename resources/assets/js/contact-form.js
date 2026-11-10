@@ -34,6 +34,10 @@
     }
 
     // Email: solo la casella dell'email. Telefono: prefisso e numero.
+    // Il campo nascosto si disabilita: il browser non lo valida (un'email storta
+    // lasciata lì non blocca l'invio senza messaggio) e non si posta; il valore
+    // resta, così tornando al tipo di prima si ritrova. Il server prende il
+    // valore dalla colonna del tipo scelto: l'altra, assente, non svuota niente.
     function refreshRow(row) {
         var kind = kindOf(row);
         if (!kind) { return; }
@@ -43,6 +47,13 @@
             var show = input.getAttribute('data-ca-point-only') === kind;
             box.style.display = show ? '' : 'none';
             box.setAttribute('aria-hidden', show ? 'false' : 'true');
+            input.disabled = !show;
+
+            // Un'email storica che il browser non accetta, lasciata com'è: il server la tiene (`ContactPoints::split()`).
+            if (show && input.type === 'email' && input.value !== '' && input.value === input.defaultValue && input.validity && input.validity.typeMismatch) {
+                input.type = 'text';
+                input.setAttribute('inputmode', 'email');
+            }
         });
 
         var locked = row.querySelector('[data-ca-point-locked]');
