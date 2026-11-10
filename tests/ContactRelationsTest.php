@@ -48,7 +48,7 @@ check('normalize: scarta vuoti, doppioni e controparti inesistenti; un solo prin
     ], [], 'company_id', 1, [2, 3]);
 
     return count($rows) === 2
-        && $rows[0] === ['person_id' => 2, 'job_title' => 'Acquisti', 'is_primary' => 'true', 'receives_documents' => 'true', 'access' => 'buyer', 'deleted' => 'false']
+        && $rows[0] === ['person_id' => 2, 'job_title' => 'Acquisti', 'is_primary' => 'true', 'receives_documents' => 'true', 'access' => 'buyer', 'email' => '', 'phone_prefix' => '', 'phone' => '', 'deleted' => 'false']
         && $rows[1]['person_id'] === 3 && $rows[1]['is_primary'] === 'false' && $rows[1]['access'] === 'none' && !isset($rows[1]['department']);
 });
 
@@ -220,7 +220,7 @@ check('CompanyRecord::from: campi, referenti con accesso, id esterni', function 
     return $record['schema'] === CompanyRecord::SCHEMA && $record['entity'] === 'company'
         && $record['business_name'] === 'Rossi srl' && $record['pi'] === '01234567890' && $record['cap'] === ''
         && $record['is_supplier'] === true && !array_key_exists('name', $record)
-        && $record['relations'] === [['person_id' => 2, 'job_title' => 'Acquisti', 'department' => 'administration', 'departments' => ['administration', 'purchasing'], 'is_primary' => true, 'receives_documents' => true, 'access' => 'admin']]
+        && $record['relations'] === [['person_id' => 2, 'job_title' => 'Acquisti', 'department' => 'administration', 'departments' => ['administration', 'purchasing'], 'is_primary' => true, 'receives_documents' => true, 'access' => 'admin', 'work_email' => '', 'work_phone_prefix' => '', 'work_phone' => '']]
         && array_column($record['external_ids'], 'external_id') === ['hs-1']
         && json_encode($record) !== false && CompanyRecord::from(99) === null;
 });
@@ -240,7 +240,7 @@ check('ContactRecord::from: persona con aziende e consensi', function () use ($t
 
     return $record['entity'] === 'contact' && $record['name'] === 'Anna' && $record['birth_date'] === '1990-01-02'
         && !array_key_exists('business_name', $record) && $record['user_id'] === 8
-        && $record['relations'] === [['company_id' => 1, 'job_title' => '', 'department' => '', 'departments' => [], 'is_primary' => true, 'receives_documents' => false, 'access' => 'buyer']]
+        && $record['relations'] === [['company_id' => 1, 'job_title' => '', 'department' => '', 'departments' => [], 'is_primary' => true, 'receives_documents' => false, 'access' => 'buyer', 'work_email' => '', 'work_phone_prefix' => '', 'work_phone' => '']]
         && $record['consents'] === ['newsletter' => 'granted'];
 });
 

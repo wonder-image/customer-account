@@ -19,6 +19,10 @@ use Wonder\Sql\TableSchema as Column;
  * (più di una; la vecchia colonna `department` la copia
  * `Migrations\RelationDepartmentsMigration`). `receives_documents`,
  * `is_primary` e `access` restano qui: l'accesso non dipende mai dall'area.
+ *
+ * `email`, `phone_prefix`, `phone` sono i contatti di lavoro del referente
+ * per questa azienda (facoltativi): a chi scrivere per lei. Non sono mai
+ * un'email di accesso né servono a collegare un account.
  */
 class ContactRelation extends Model
 {
@@ -54,6 +58,9 @@ class ContactRelation extends Model
             Column::key('is_primary')->enum(['true', 'false'])->default('false'),
             Column::key('receives_documents')->enum(['true', 'false'])->default('false'),
             Column::key('access')->enum(self::ACCESS)->default(self::ACCESS_NONE),
+            Column::key('email')->length(190),
+            Column::key('phone_prefix')->length(8),
+            Column::key('phone')->length(30),
             Column::key('position')->int(),
         ];
     }
@@ -75,6 +82,10 @@ class ContactRelation extends Model
             Field::key('is_primary')->text()->sanitize(false),
             Field::key('receives_documents')->text()->sanitize(false),
             Field::key('access')->text()->sanitize(false),
+            // Già ripuliti da `ContactRelations::normalize()`.
+            Field::key('email')->text()->sanitize(false),
+            Field::key('phone_prefix')->text()->sanitize(false),
+            Field::key('phone')->text()->sanitize(false),
             Field::key('position')->number()->decimals(0),
         ];
     }

@@ -25,10 +25,14 @@ class Company extends Model
     public static string $folder = 'companies';
     public static string $icon = 'bi bi-building';
 
-    /** Fatturazione da società: ragione sociale, CF, P.IVA, SDI, PEC. */
+    /**
+     * Fatturazione da società: ragione sociale, CF, P.IVA, SDI, PEC, con place
+     * ID e coordinate e la ricerca anche per nome dell'attività (che, nel
+     * form, dà la ragione sociale se è vuota).
+     */
     public static function billing(): AddressExtension
     {
-        return AddressExtension::billing(countryDefault: 'IT')->withLink(false)->asBusiness();
+        return AddressExtension::billing(countryDefault: 'IT')->withLink(false)->asBusiness()->withGeo()->withNameSearch();
     }
 
     public static function syncSchema(): ?SyncSchema

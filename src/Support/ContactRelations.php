@@ -47,8 +47,10 @@ final class ContactRelations
      * riga (il commerciale vede solo le sue): `fn(string $modelClass, list<int>
      * $ids): list<int>` dà gli id ammessi fra quelli dati. In scrittura una
      * controparte non ammessa si scarta, ma una già legata resta (chi non la
-     * vede non la stacca salvando); in lettura le scelte del repeater sono le
-     * ammesse più quelle già legate. `null` (il default) = tutte.
+     * vede non la stacca salvando), ma in sola lettura: mansione, principale,
+     * documenti, accesso, contatti di lavoro, aree e brand seguiti restano
+     * quelli salvati, qualunque cosa arrivi (`sync()`); in lettura le scelte
+     * del repeater sono le ammesse più quelle già legate. `null` (il default) = tutte.
      */
     public static function useCounterpartFilter(?callable $filter): void
     {
@@ -191,6 +193,7 @@ final class ContactRelations
                 'is_primary' => self::flag($row['is_primary'] ?? 'false'),
                 'receives_documents' => self::flag($row['receives_documents'] ?? 'false'),
                 'access' => $access,
+            ] + self::workContacts($row, $stored ?? []) + [
                 'deleted' => 'false',
             ];
 
@@ -208,6 +211,25 @@ final class ContactRelations
         }
 
         return $rows;
+    }
+
+    /**
+     * I contatti di lavoro di una riga (`email`, `phone_prefix`, `phone`),
+     * ripuliti come i contatti della scheda ma senza DNS: email in minuscolo
+     * e di formato valido, telefono a sole cifre, prefisso `+NN`. Un valore
+     * non valido (o non scalare) vale vuoto; una riga senza la chiave tiene
+     * quello salvato. Il controllo del dominio lo fa il form
+     * (`HasContactRelations::assertRelationContacts()`).
+     *
+     * @return array{email: string, phone_prefix: string, phone: string}
+     */
+    public static function workContacts(array $row, array $stored = []): array
+    {
+        $email = array_key_exists('email', $row) ? ContactPoints::cleanEmail($row['email']) : (string) ($stored['email'] ?? '');
+        $phone = array_key_exists('phone', $row) ? (ContactPoints::phoneNumber($row['phone']) ?? '') : (string) ($stored['phone'] ?? '');
+        $prefix = array_key_exists('phone_prefix', $row) ? (ContactPoints::phonePrefix($row['phone_prefix']) ?? '') : (string) ($stored['phone_prefix'] ?? '');
+
+        return ['email' => $email, 'phone_prefix' => $phone !== '' ? $prefix : '', 'phone' => $phone];
     }
 
     /** `'true'` o `'false'` da quello che arriva da un select, un checkbox o un booleano. */
@@ -428,6 +450,9 @@ final class ContactRelations
      * I referenti di un'azienda, in ordine: ogni riga del legame con la
      * scheda della persona sotto `contact` e le aree in `departments`
      * (vuota = tutte; `department` è la prima, per chi leggeva il reparto).
+     * I contatti di lavoro sono in `work_email`, `work_phone_prefix`,
+     * `work_phone`; `contact_email` è l'email a cui scrivergli per
+     * quest'azienda (di lavoro se c'è, altrimenti la sua).
      *
      * @param int $brandId se c'è, solo chi segue quel brand o tutti i brand
      * @return list<array<string, mixed>>
@@ -638,8 +663,8 @@ final class ContactRelations
      * Crea, o riapre, il solo legame fra un'azienda e una persona, senza
      * ripassare né toccare gli altri legami dell'una o dell'altra (la
      * creazione rapida). `$values` come una riga di `sync()` (`job_title`,
-     * `is_primary`, `receives_documents`, `access`, `departments`, `brand_ids`);
-     * `access` è `none` se non c'è, e passa da `useAccessGuard()`. Un legame
+     * `is_primary`, `receives_documents`, `access`, `departments`, `brand_ids`,
+     * `email`, `phone_prefix`, `phone`); `access` è `none` se non c'è, e passa da `useAccessGuard()`. Un legame
      * già vivo non cambia: per modificarlo c'è `sync()`. Stessa transazione e
      * stessi eventi di `sync()` (`contact.linked` dopo il commit). Non applica
      * il filtro delle controparti: chi chiama sa già che le due schede si vedono.
@@ -755,7 +780,8 @@ final class ContactRelations
      * passano da qui.
      *
      * `$rows` sono le righe grezze dell'altro lato (`person_id` o `company_id`,
-     * `job_title`, `departments`, `is_primary`, `receives_documents`, `access`, `brand_ids`; dal lato azienda anche
+     * `job_title`, `departments`, `is_primary`, `receives_documents`, `access`, `brand_ids`,
+     * i contatti di lavoro `email`, `phone_prefix`, `phone` (vedi `workContacts()`); dal lato azienda anche
      * `new_name`, `new_surname`, `new_email` per creare la persona). Le righe non
      * presenti si cancellano (soft delete). Una riga senza `departments` (o
      * senza il vecchio `department`) tiene le aree di prima, come `brand_ids`.
@@ -825,6 +851,32 @@ final class ContactRelations
         $before = self::liveByCounterpart($parentColumn, $parentId);
         $valid = self::existingCounterparts($parentColumn, array_map(static fn (array $row): int => self::id($row[$other] ?? 0), $rows), $parentId);
         $clean = self::normalize($rows, self::allRowsOf($parentColumn, $parentId), $parentColumn, $parentId, $valid);
+        $readonly = self::readonlyCounterparts($parentColumn, array_map(static fn (array $row): int => (int) $row[$other], $clean));
+
+        // Una controparte che chi scrive non vede resta com'era: nessun campo del legame arriva dal POST.
+        if ($readonly !== []) {
+            $primaryKept = false;
+
+            foreach ($clean as $i => $row) {
+                $counterpartId = (int) $row[$other];
+
+                if (isset($readonly[$counterpartId], $before[$counterpartId])) {
+                    $clean[$i] = self::storedClean($before[$counterpartId], $other);
+                    $primaryKept = $primaryKept || $clean[$i]['is_primary'] === 'true';
+                    unset($brands[$counterpartId], $areas[$counterpartId]);
+                }
+            }
+
+            // Dal lato azienda un principale salvato e non visibile tiene il titolo.
+            if ($primaryKept && $parentColumn === self::COMPANY) {
+                foreach ($clean as $i => $row) {
+                    if (!isset($readonly[(int) $row[$other]])) {
+                        $clean[$i]['is_primary'] = 'false';
+                    }
+                }
+            }
+        }
+
         $relation = RepeaterRelation::make(ContactRelation::$table, $parentColumn)
             ->model(ContactRelation::class)
             ->positionKey('position')
@@ -833,7 +885,7 @@ final class ContactRelations
 
         if ($parentColumn === self::PERSON) {
             foreach ($clean as $row) {
-                if ($row['is_primary'] === 'true') {
+                if ($row['is_primary'] === 'true' && !isset($readonly[(int) $row[self::COMPANY]])) {
                     self::demoteOtherPrimaries((int) $row[self::COMPANY], $parentId);
                 }
             }
@@ -991,6 +1043,45 @@ final class ContactRelations
         return $out;
     }
 
+    /**
+     * Le controparti delle righe che chi scrive non vede: con un filtro
+     * (`useCounterpartFilter()`) quelle non ammesse. Sono già legate
+     * (`existingCounterparts()` scarta le altre): il loro legame è in sola
+     * lettura. Senza filtro nessuna.
+     *
+     * @param list<int> $ids
+     * @return array<int, true>
+     */
+    private static function readonlyCounterparts(string $parentColumn, array $ids): array
+    {
+        if (self::$counterpartFilter === null || $ids === []) {
+            return [];
+        }
+
+        return array_fill_keys(array_values(array_diff($ids, self::allowedCounterparts($parentColumn, $ids))), true);
+    }
+
+    /**
+     * Una riga salvata nella forma di `normalize()`, per un legame in sola lettura.
+     *
+     * @return array<string, mixed>
+     */
+    private static function storedClean(array $stored, string $other): array
+    {
+        return [
+            'id' => (int) $stored['id'],
+            $other => (int) $stored[$other],
+            'job_title' => (string) ($stored['job_title'] ?? ''),
+            'is_primary' => self::flag($stored['is_primary'] ?? 'false'),
+            'receives_documents' => self::flag($stored['receives_documents'] ?? 'false'),
+            'access' => self::access($stored['access'] ?? null),
+            'email' => (string) ($stored['email'] ?? ''),
+            'phone_prefix' => (string) ($stored['phone_prefix'] ?? ''),
+            'phone' => (string) ($stored['phone'] ?? ''),
+            'deleted' => 'false',
+        ];
+    }
+
     /** @return array<int, array<string, mixed>> le righe vive per id della controparte */
     private static function liveByCounterpart(string $parentColumn, int $parentId): array
     {
@@ -1026,6 +1117,8 @@ final class ContactRelations
         $key = $parentColumn === self::COMPANY ? 'contact' : 'company';
         $relations = self::rows(ContactRelation::find([$parentColumn => $parentId], null, 'position', 'ASC'));
         $areas = self::departmentsByRelation(array_map(static fn (array $row): int => (int) $row['id'], $relations));
+        // Dal lato della persona l'email di ripiego è la sua: si legge una volta.
+        $person = $parentColumn === self::PERSON && $relations !== [] ? Contact::findById($parentId) : null;
         $out = [];
 
         foreach ($relations as $row) {
@@ -1033,11 +1126,32 @@ final class ContactRelations
 
             if (is_array($record) && isset($record['id'])) {
                 $departments = $areas[(int) $row['id']] ?? [];
-                $out[] = ['departments' => $departments, 'department' => $departments[0] ?? ''] + $row + [$key => $record];
+                $personEmail = (string) (($parentColumn === self::COMPANY ? $record : $person)['email'] ?? '');
+                $out[] = ['departments' => $departments, 'department' => $departments[0] ?? ''] + self::workFields($row, $personEmail) + $row + [$key => $record];
             }
         }
 
         return $out;
+    }
+
+    /**
+     * I contatti di lavoro di un legame per chi legge: `work_email`,
+     * `work_phone_prefix`, `work_phone` e `contact_email`, l'email da usare
+     * per scrivere al referente per quell'azienda (quella di lavoro, se c'è,
+     * altrimenti la sua).
+     *
+     * @return array{work_email: string, work_phone_prefix: string, work_phone: string, contact_email: string}
+     */
+    private static function workFields(array $relation, string $personEmail): array
+    {
+        $email = (string) ($relation['email'] ?? '');
+
+        return [
+            'work_email' => $email,
+            'work_phone_prefix' => (string) ($relation['phone_prefix'] ?? ''),
+            'work_phone' => (string) ($relation['phone'] ?? ''),
+            'contact_email' => $email !== '' ? $email : strtolower(trim($personEmail)),
+        ];
     }
 
     /** Un id da un valore della richiesta: un valore non scalare (`x[]=1`) vale 0. */

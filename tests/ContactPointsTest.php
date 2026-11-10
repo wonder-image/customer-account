@@ -121,7 +121,7 @@ check('sync: scrive, tiene la riga dello stesso valore, toglie le altre, ignora 
         && count(Query::$tables['contact_points']) === 3;
 });
 
-check('form: «Altri contatti» su persone e aziende, rifiuti con il messaggio, valori ripresi, scrittura solo col segnaposto', function () use ($seed, $token, $reject) {
+check('form: riquadro «Contatti» su persone e aziende; «Altri contatti» (marker vecchio) ancora rifiuta, legge e scrive; scrittura solo col segnaposto', function () use ($seed, $token, $reject) {
     Query::reset($seed());
     $names = static fn (string $resource): array => array_map(static fn ($field) => $field->name, $resource::formSchema());
     $person = ['name' => 'Anna', 'surname' => 'Bianchi', 'email' => 'anna@rossi.test', 'active' => 'true', '_csrf' => $token, 'contact_points_form' => '1'];
@@ -134,17 +134,22 @@ check('form: «Altri contatti» su persone e aziende, rifiuti con il messaggio, 
     $form = CompanyResource::hydrateRepeaterFormValues([], 2, [], []);
     $address = CompanyAddressResource::hydrateRepeaterFormValues([], 2, [], []);
 
-    return in_array('contact_points', $names(ContactResource::class), true) && in_array('contact_points_form', $names(CompanyResource::class), true)
+    return in_array('contact_points', $names(ContactResource::class), true) && in_array('contact_box_form', $names(CompanyResource::class), true)
+        && !in_array('contact_points_form', $names(CompanyResource::class), true)
+        && !in_array('email', $names(ContactResource::class), true) && !in_array('phone', $names(ContactResource::class), true)
         && !in_array('contact_points', $names(CompanyAddressResource::class), true)
         && $bad === 'contacts.point_duplicate'
         && !array_key_exists('contact_points', $ok) && !array_key_exists('contact_points_form', $ok) && $ok['email'] === 'anna@rossi.test'
         && $untouched === []
         && Query::$tables['company_points'] !== [] && (int) array_values(Query::$tables['company_points'])[0]['company_id'] === 2
-        && $form['contact_points'] === [['kind' => 'email', 'value' => 'ordini@rossi.test', 'phone_prefix' => '', 'label' => 'work']]
+        && $form['contact_points'] === [
+            ['kind' => 'email', 'email' => 'info@rossi.test', 'phone_prefix' => '', 'phone' => '', 'label' => '', 'is_primary' => 'true', 'locked' => '', 'departments' => []],
+            ['kind' => 'email', 'email' => 'ordini@rossi.test', 'phone_prefix' => '', 'phone' => '', 'label' => 'work', 'is_primary' => 'false', 'locked' => '', 'departments' => []],
+        ]
         && !array_key_exists('contact_points', $address);
 });
 
-check('record: email principale invariata, recapiti in più in emails e phones; fromArray e validate', function () use ($seed) {
+check('record: email principale invariata, tutti i contatti in emails e phones (il principale per primo); fromArray e validate', function () use ($seed) {
     Query::reset($seed());
     ContactPoints::sync(ContactPoints::CONTACT, 2, [
         ['kind' => 'email', 'value' => 'b@rossi.test', 'label' => 'billing'],
@@ -154,10 +159,13 @@ check('record: email principale invariata, recapiti in più in emails e phones; 
     $company = CompanyRecord::from(2);
     $in = ContactRecord::fromArray(['name' => 'X', 'emails' => [['value' => 'no'], 'x'], 'phones' => [['value' => '02 1x']]]);
 
-    return $person['schema'] === 3 && $person['email'] === 'anna@rossi.test'
-        && $person['emails'] === [['value' => 'b@rossi.test', 'label' => 'billing']]
-        && $person['phones'] === [['phone_prefix' => '+39', 'value' => '021234567', 'label' => 'work']]
-        && $company['emails'] === [] && $company['phones'] === []
+    return $person['schema'] === 4 && $person['email'] === 'anna@rossi.test'
+        && $person['emails'] === [['value' => 'anna@rossi.test', 'label' => '', 'is_primary' => true], ['value' => 'b@rossi.test', 'label' => 'billing', 'is_primary' => false]]
+        && $person['phones'] === [
+            ['phone_prefix' => '+39', 'value' => '3331112222', 'label' => '', 'is_primary' => true],
+            ['phone_prefix' => '+39', 'value' => '021234567', 'label' => 'work', 'is_primary' => false],
+        ]
+        && $company['emails'] === [['value' => 'info@rossi.test', 'label' => '', 'is_primary' => true, 'departments' => []]] && $company['phones'] === []
         && $in['emails'] === [['value' => 'no']]
         && ContactRecord::validate($in) === ['emails.0' => 'invalid', 'phones.0' => 'invalid'];
 });

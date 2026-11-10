@@ -15,11 +15,14 @@ use Wonder\Plugin\CustomerAccount\Models\CompanyBrand;
  * `SCHEMA` 4: i brand portano i loro dati (`BrandData::fromRow()`: logo come
  * percorso e URL, sito, dominio, descrizione e i campi del kit, anche se il
  * kit è spento); l'azienda `emails` e `phones`, i referenti `departments`.
+ * `SCHEMA` 5: come `PartyRecord` 4 (tutti i contatti con `is_primary`, qui
+ * anche con le aree `departments`; contatti di lavoro dei referenti; geo
+ * della fatturazione).
  */
 final class CompanyRecord extends PartyRecord
 {
     public const ENTITY = 'company';
-    public const SCHEMA = 4;
+    public const SCHEMA = 5;
 
     public static function entity(): string
     {

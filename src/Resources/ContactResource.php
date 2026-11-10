@@ -10,14 +10,17 @@ use Wonder\Plugin\CustomerAccount\Support\ContactExport;
 use Wonder\App\Resource;
 use Wonder\App\ResourceRegistry;
 use Wonder\App\ResourceSchema\{ApiSchema, FormField, NavigationSchema, PageSchema, PermissionSchema, TableColumn, TableLayoutSchema};
+use Wonder\App\Support\GoogleMaps;
 use Wonder\Elements\Components\Card;
 use Wonder\Elements\Form\Form;
 use Wonder\Http\Csrf;
 
 /**
  * La rubrica delle persone, senza campi commerciali né credenziali. Email e
- * telefono principali sono campi della scheda; quelli in più stanno nel
- * repeater «Altri contatti» (`HasContactPoints`).
+ * telefoni stanno tutti nel riquadro «Contatti» (`HasContactPoints`): il
+ * principale di ogni tipo si salva nelle colonne `email`, `phone_prefix`,
+ * `phone`, gli altri in `contact_points`. Un POST con i soli campi singoli
+ * (senza `contact_box_form`) si salva come prima.
  * `CompanyResource` la estende per le aziende: i punti che cambiano sono
  * `requiredKeys()`, `exportFields()`, `addressesPath()` e gli eventi.
  */
@@ -43,13 +46,15 @@ class ContactResource extends Resource
     }
     public static function formSchema(): array
     {
-        $fields = static::$model::billing()->formSchema();
+        // Telefono ed email stanno nel riquadro «Contatti», non nei campi della fatturazione.
+        $fields = array_diff_key(static::$model::billing()->formSchema(), ['phone_prefix' => true, 'phone' => true]);
         foreach (static::requiredKeys() as $key) { $fields[$key]->required(); }
+        // Un'attività cercata per nome dà la ragione sociale, se è vuota (lo script del modulo).
+        if (isset($fields['business_name'], $fields['street'])) { $fields['street']->attribute('data-ca-place-name="business_name"'); }
         return [
             ...array_values($fields),
             ...static::extraFormFields(),
-            FormField::key('email')->email(),
-            ...static::contactPointFields(),
+            ...static::contactBoxFields(),
             FormField::key('note')->textarea(),
             FormField::key('active')->select(['true' => (string) __t('contacts.enabled'), 'false' => (string) __t('contacts.disabled')])->value('true')->required(),
             ...static::contactRelationFields(),
@@ -60,7 +65,7 @@ class ContactResource extends Resource
         $widths = ['country' => 12, 'is_customer' => 6, 'is_supplier' => 6, 'street' => 9, 'number' => 3, 'province' => 4, 'city' => 5, 'cap' => 3, 'phone_prefix' => 3, 'phone' => 9, 'name' => 6, 'surname' => 6,
             'pi' => 6, 'sdi' => 6];
         $fields = array_map(static fn ($field) => $field->columnSpan($widths[$field->name] ?? 12), static::formSchema());
-        return (new Form)->columns(12)->components([(new Card)->columns(12)->columnSpan(12)->components($fields)]);
+        return (new Form)->columns(12)->components([(new Card)->columns(12)->columnSpan(12)->components([...$fields, static::contactFormScript()])]);
     }
     public static function tableSchema(): array
     {
@@ -136,10 +141,14 @@ class ContactResource extends Resource
     public static function mutateRequestValues(array $values, string $action, string $context = 'backend', ?array $oldValues = null): array
     {
         static::verifyFormToken($values);
-        // I recapiti in più non sono colonne: si controllano qui e li scrive `syncRepeaterRelations()`.
-        static::assertContactPoints($values, $oldValues);
-        $values = array_intersect_key($values, static::labelSchema());
-        foreach ($values as $key => $value) {
+        // Il riquadro «Contatti» rimette il principale nelle colonne; le altre righe le scrive `syncRepeaterRelations()`.
+        // Con un account l'email di accesso non si cambia da qui, con o senza riquadro: si scarta.
+        $values = static::applyContactPoints(static::withoutAccessEmail($values, $oldValues), $oldValues);
+        // I contatti di lavoro dei referenti: il repeater non arriva qui (lo toglie `stripRelationInputValues()`).
+        static::assertRelationContacts($_POST);
+        $geo = static::postedGeo($values);
+        $values = array_intersect_key($values, static::labelSchema()) + $geo;
+        foreach (array_diff_key($values, $geo) as $key => $value) {
             if (!is_scalar($value) && $value !== null) { throw new InvalidArgumentException((string) __t('contacts.field_invalid', ['field' => static::labelSchema()[$key]])); }
         }
         foreach (['active', 'is_customer', 'is_supplier'] as $flag) {
@@ -160,6 +169,15 @@ class ContactResource extends Resource
         }
         if ($action === 'store') { $values['code'] = static::$model::newCode(); }
         return $values;
+    }
+    /**
+     * Place ID e coordinate della fatturazione, ripuliti (`GoogleMaps::cleanGeo()`):
+     * solo se il form li ha postati, così un salvataggio senza non li azzera.
+     * Arrivano dal browser: servono per mappe e distanze, mai per decidere.
+     */
+    protected static function postedGeo(array $values): array
+    {
+        return array_intersect_key($values, array_flip(['place_id', 'lat', 'lng'])) !== [] ? GoogleMaps::cleanGeo($values) : [];
     }
     /** Difesa locale: il controller del core ha già verificato `_csrf`, che arriva qui con il POST. */
     protected static function verifyFormToken(array $values): void

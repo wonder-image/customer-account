@@ -246,7 +246,7 @@ trait HasSignupFields
         }
         $values = array_intersect_key($input, $address->labels());
         return $section === 'billing'
-            ? array_diff_key($values, ['phone_prefix' => true, 'phone' => true, 'email' => true])
+            ? array_diff_key($values, ['phone_prefix' => true, 'phone' => true, 'email' => true]) + AccountBilling::geo($input)
             : $values + GoogleMaps::cleanGeo($input, $address->prefix().'_');
     }
 

@@ -27,7 +27,10 @@ class ContactAddressResource extends ContactResource
     }
     public static function labelSchema(): array
     {
-        return static::$model::address()->labels() + [static::parentKey() => static::parentResourceLabel(), 'label' => (string) __t('contacts.address_label')];
+        return static::$model::address()->labels() + [
+            static::parentKey() => static::parentResourceLabel(), 'label' => (string) __t('contacts.address_label'),
+            'business_name' => (string) __t('contacts.address_business_name'),
+        ];
     }
     protected static function parentResourceLabel(): string
     {
@@ -39,12 +42,20 @@ class ContactAddressResource extends ContactResource
         foreach (static::parentModel()::all() as $row) { $options[(int) $row['id']] = parent::displayName($row); }
         return $options;
     }
+    /**
+     * «Presso» (`business_name`) è l'attività o la società a quell'indirizzo:
+     * cercata per nome nella via, si riempie da sola se è vuota (lo script del
+     * modulo) e resta modificabile.
+     */
     public static function formSchema(): array
     {
+        $fields = AccountAddressForm::fields(static::$model::address());
+        if (isset($fields['street'])) { $fields['street']->attribute('data-ca-place-name="business_name"'); }
         return [
             FormField::key(static::parentKey())->selectSearch(static::contactOptions())->required(),
             FormField::key('label')->text(),
-            ...array_values(AccountAddressForm::fields(static::$model::address())),
+            FormField::key('business_name')->text(),
+            ...array_values($fields),
         ];
     }
     public static function mutateFormValues(array $values, string $mode, string $context = 'backend'): array
@@ -65,7 +76,7 @@ class ContactAddressResource extends ContactResource
     }
     public static function tableLayoutSchema(): TableLayoutSchema
     {
-        return TableLayoutSchema::for(static::class)->searchFields(['label', 'name', 'surname', 'city', 'street'])
+        return TableLayoutSchema::for(static::class)->searchFields(['label', 'business_name', 'name', 'surname', 'city', 'street'])
             ->filterCustom(static::parentResourceLabel(), static::parentKey(), static::contactOptions());
     }
     public static function mutateRequestValues(array $values, string $action, string $context = 'backend', ?array $oldValues = null): array
@@ -77,8 +88,10 @@ class ContactAddressResource extends ContactResource
         if (!$contactId || !static::parentModel()::findById($contactId) || ($oldValues !== null && $contactId !== (int) $oldValues[$key])) {
             throw new InvalidArgumentException((string) __t('contacts.invalid_contact'));
         }
-        if (isset($values['label']) && (!is_string($values['label']) || mb_strlen($values['label']) > 100)) {
-            throw new InvalidArgumentException((string) __t('contacts.field_invalid', ['field' => static::labelSchema()['label']]));
+        foreach (['label' => 100, 'business_name' => 150] as $field => $max) {
+            if (isset($values[$field]) && (!is_string($values[$field]) || mb_strlen($values[$field]) > $max)) {
+                throw new InvalidArgumentException((string) __t('contacts.field_invalid', ['field' => static::labelSchema()[$field]]));
+            }
         }
         $errors = AccountAddressValidation::validate(static::$model::address(), $values);
         if ($errors !== []) { throw new InvalidArgumentException(implode("\n", $errors)); }
