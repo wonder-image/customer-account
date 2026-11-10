@@ -25,6 +25,7 @@
 
 ### Fixed
 
+- Il «+» dei legami accetta il layout della finestra (quinto elemento di `relationQuickCreate()`): senza, una finestra con un campo che non è nel form del target (l'email, ora nel riquadro «Contatti») faceva andare in errore la scheda («Input resource non trovato»).
 - Email di accesso: `ContactResource::mutateRequestValues()` scarta l'`email` postata per una persona con account anche senza riquadro (`HasContactPoints::withoutAccessEmail()`, ereditato dalle sottoclassi); `ContactAccount::link()`, cambio email del pannello e registrazione non ne sono toccati (test).
 - Valori storici: un'email o un telefono principali che le regole di oggi non riconoscono si mostrano (il telefono prova a separare un prefisso noto) e, riportati com'erano o non postati, restano; prima aprire e salvare la scheda li svuotava. `split()` porta `kept`.
 - Aree dei contatti delle aziende: si tolgono quelle di valori che non sono più contatti a ogni scrittura del modulo, un contatto nuovo non eredita quelle rimaste (`ContactPoints::dropOrphanDepartments()` per chi scrive da fuori); una casella con sole aree non più note non si occupa più «di tutto» in `companyEmailsFor()`, e il form non le toglie.

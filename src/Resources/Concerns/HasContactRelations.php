@@ -2,6 +2,7 @@
 
 namespace Wonder\Plugin\CustomerAccount\Resources\Concerns;
 
+use Closure;
 use InvalidArgumentException;
 use Throwable;
 use Wonder\App\ResourceSchema\FormField;
@@ -185,11 +186,13 @@ trait HasContactRelations
 
     /**
      * Il «+» del select di una riga, per creare al volo l'altro lato.
-     * Restituisce `[Resource, campi, campo etichetta, testo del bottone]`
+     * Restituisce `[Resource, campi, campo etichetta, testo del bottone, layout]`
      * o null (nessun «+», il default): lo sovrascrive chi ha una Resource
-     * che sa creare persone o aziende (`QuickCreateStore`).
+     * che sa creare persone o aziende (`QuickCreateStore`). Il layout serve
+     * quando un campo non è nel form del target (l'email sta nel riquadro
+     * «Contatti»).
      *
-     * @return array{0: class-string, 1?: list<string>|null, 2?: string|null, 3?: string|null}|null
+     * @return array{0: class-string, 1?: list<string>|null, 2?: string|null, 3?: string|null, 4?: Closure|null}|null
      */
     protected static function relationQuickCreate(string $parentColumn): ?array
     {
@@ -204,7 +207,7 @@ trait HasContactRelations
             return $column;
         }
 
-        return $column->quickCreate($quick[0], $quick[1] ?? null, null, $quick[2] ?? null, $quick[3] ?? null);
+        return $column->quickCreate($quick[0], $quick[1] ?? null, $quick[4] ?? null, $quick[2] ?? null, $quick[3] ?? null);
     }
 
     /** @return list<Input> */
