@@ -7,6 +7,7 @@ require __DIR__.'/bootstrap.php';
 require_once WI_APP_ROOT.'/app/function/string/date.php';
 require_once WI_APP_ROOT.'/app/function/other/geo.php';
 
+use Wonder\Backend\Support\ResourceFormLayoutRenderer;
 use Wonder\Http\Csrf;
 use Wonder\Plugin\CustomerAccount\Account\AccountBilling;
 use Wonder\Plugin\CustomerAccount\Models\Company;
@@ -62,11 +63,30 @@ check('colonne: place ID e coordinate in fatturazione (persone e aziende), «Pre
 });
 
 check('form: la via cerca anche le attività per nome; il nome va nella ragione sociale (aziende) o in «Presso» (consegna), non nella persona', function () use ($street) {
-    return str_contains($street(ContactResource::class), 'data-wi-place-names') && !str_contains($street(ContactResource::class), 'data-ca-place-name')
-        && str_contains($street(CompanyResource::class), 'data-ca-place-name="business_name"')
-        && str_contains($street(ContactAddressResource::class), 'data-wi-place-names') && str_contains($street(ContactAddressResource::class), 'data-ca-place-name="business_name"')
-        && str_contains($street(CompanyAddressResource::class), 'data-ca-place-name="business_name"')
+    $name = 'data-wi-place-name="business_name"';
+
+    return str_contains($street(ContactResource::class), 'data-wi-place-names') && !str_contains($street(ContactResource::class), 'data-wi-place-name=')
+        && str_contains($street(CompanyResource::class), $name)
+        && str_contains($street(ContactAddressResource::class), 'data-wi-place-names') && str_contains($street(ContactAddressResource::class), $name)
+        && str_contains($street(CompanyAddressResource::class), $name)
+        && !str_contains($street(ContactResource::class).$street(CompanyResource::class).$street(ContactAddressResource::class), 'data-ca-place-name')
         && in_array('place_id', array_map(static fn ($field) => $field->name, ContactResource::formSchema()), true);
+});
+
+check('form: l\'area account non ha «Presso», quindi la sua via non chiede il nome dell\'attività', function () {
+    return str_contains(ContactAddress::address()->formSchema()['street']->get('attribute'), 'data-wi-place-names')
+        && !str_contains(ContactAddress::address()->formSchema()['street']->get('attribute'), 'data-wi-place-name=')
+        && str_contains(Company::billing()->formSchema()['street']->get('attribute'), 'data-wi-place-name="business_name"');
+});
+
+check('resa: la via esce con gli attributi della lib e il campo di arrivo nello stesso form (azienda e consegna)', function () {
+    require_once WI_APP_ROOT.'/app/function/other/geo.php';
+    $html = static fn (string $resource): string => ResourceFormLayoutRenderer::render($resource::formLayoutSchema());
+    $street = '/<input[^>]*name="street"[^>]*data-wi-place=""[^>]*data-wi-place-names data-wi-place-name="business_name"/';
+
+    return preg_match($street, $html(CompanyResource::class)) === 1 && str_contains($html(CompanyResource::class), 'name="business_name"')
+        && preg_match($street, $html(ContactAddressResource::class)) === 1 && str_contains($html(ContactAddressResource::class), 'name="business_name"')
+        && !str_contains($html(ContactResource::class), 'data-wi-place-name=');
 });
 
 check('scheda: geo dal form ripulito (fuori limiti e caratteri strani = null), senza geo nel POST non si azzera', function () use ($tables, $token) {

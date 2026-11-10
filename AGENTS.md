@@ -60,12 +60,15 @@ Le convenzioni del framework sono in `vendor/wonder-image/app/AGENTS.md`.
   `phone_prefix`, `phone`): li pulisce `ContactRelations::workContacts()`;
   chi scrive a un referente per un'azienda usa `contact_email` delle righe
   di `peopleFor()` / `peopleOf()`.
-- Script dei form (`resources/assets/js/contact-form.js`, in linea con
-  `ContactFormScript::html()` nel layout): colonne del riquadro per tipo, un
-  principale per tipo, riga dell'email di accesso bloccata, nome
-  dell'attività scelta da Google nel campo `data-ca-place-name`. Sono
-  supplenze di core e lib (vedi README, «Cosa manca nel framework»): le
-  regole restano sul server.
+- Riquadro «Contatti» nel browser: le colonne per tipo e «Email di accesso»
+  le fa il framework (`visibleWhen()` / `hiddenWhen()` sulle `RepeaterColumn`,
+  col nome corto della colonna; serve app `^2.4.0-beta.7` e lib
+  `2.1.2-alpha.41`). Lo script (`resources/assets/js/contact-form.js`, in linea
+  con `contactFormScript()` solo nei layout con il riquadro) fa solo un
+  principale per tipo, la riga dell'email di accesso bloccata e le email
+  storiche non valide inviabili: niente interni della lib (`wiPlace`,
+  `.wi-place-*`), solo `change`, `[data-wi-repeater]`, il `fieldset` della
+  riga e gli attributi `data-ca-point-*`. Le regole restano sul server.
 - Dati del brand e brand kit: regole in `BrandData` (URL solo http/https,
   colori esadecimali, social da lista), kit visibile solo con
   `CompanyBrands::useKit()`; il logo passa solo come file caricato.
@@ -79,7 +82,10 @@ Le convenzioni del framework sono in `vendor/wonder-image/app/AGENTS.md`.
   scrittura); il DNS solo nella validazione del form.
 - Indirizzi: fatturazione e consegna con `withGeo()` e `withNameSearch()`;
   «Presso» degli indirizzi di consegna è `business_name` (come
-  `shipping_business_name` degli ordini). Place ID e coordinate arrivano dal
+  `shipping_business_name` degli ordini). Il nome dell'attività scelta lo
+  scrive la lib: `withNameSearch(nameKey: 'business_name')` dove il form ha
+  quel campo (`Company::billing()`, `ContactAddressResource`), `placeSearch()`
+  sulle vie dei repeater; mai attributi `data-ca-place-name` né script. Place ID e coordinate arrivano dal
   browser: si ripuliscono (`GoogleMaps::cleanGeo()`, solo se postati) e non
   decidono mai niente.
 - Brand: `code` (`cbr_`) e `slug` univoci e immutabili, `name_key` per i

@@ -4,7 +4,10 @@
 
 ### Changed
 
-- Richiede wonder-image/app `^2.4.0-beta.6`: la ricerca dell'indirizzo per nome dell'attività usa `AddressExtension::withNameSearch()`.
+- Richiede wonder-image/app `^2.4.0-beta.7` (anche in `module.json`) e la lib `2.1.2-alpha.41`: le colonne del riquadro «Contatti» e il nome dell'attività scelta negli indirizzi li fa il framework.
+- Riquadro «Contatti»: email, prefisso e telefono compaiono per tipo con `RepeaterColumn::visibleWhen('kind', …)` (la lib cerca il tipo nella riga, spegne le colonne nascoste e le riaccende con il valore), al posto degli attributi `data-ca-point-only`. La colonna `locked` è una tendina che si vede solo sulla riga dell'email di accesso, al posto dell'etichetta (`label` con `hiddenWhen('locked', '1')`), e mostra «Email di accesso»: l'etichetta `access` non è più fra le scelte di `label`. Ordine delle colonne: `kind`, `email`, `phone_prefix`, `phone`, `label`, `locked`, `is_primary` (`departments` per le aziende). Il server ignora come prima `locked` e `label = access` postati.
+- Nome dell'attività scelta: `Company::billing()` usa `withNameSearch(nameKey: 'business_name')` e `ContactAddressResource` (quindi anche `CompanyAddressResource`) `address()->withNameSearch(nameKey: 'business_name')`; la via porta `data-wi-place-name` e il nome lo scrive la lib. L'attributo `data-ca-place-name` non esiste più: chi lo metteva su una via usa `withNameSearch(nameKey:)` o `InputText::placeSearch()` del core. L'indirizzo dell'area account, che non ha «Presso», non lo chiede.
+- Lo script del modulo (`contact-form.js`) fa solo quello che il framework non offre: un principale per tipo a schermo, la riga dell'email di accesso bloccata, le email storiche non accettate dal browser inviabili com'erano. Niente più letture degli interni della lib (`input.wiPlace`, `.wi-place-option`) né `MutationObserver`; si appoggia a `[data-wi-repeater]`, al `fieldset` della riga e agli attributi `data-ca-point-*`. `ContactResource::formLayoutSchema()` lo stampa solo se il form ha il riquadro (non negli indirizzi).
 
 ### Breaking
 
@@ -29,7 +32,7 @@
 - Valori storici: un'email o un telefono principali che le regole di oggi non riconoscono si mostrano (il telefono prova a separare un prefisso noto) e, riportati com'erano o non postati, restano; prima aprire e salvare la scheda li svuotava. `split()` porta `kept`.
 - Aree dei contatti delle aziende: si tolgono quelle di valori che non sono più contatti a ogni scrittura del modulo, un contatto nuovo non eredita quelle rimaste (`ContactPoints::dropOrphanDepartments()` per chi scrive da fuori); una casella con sole aree non più note non si occupa più «di tutto» in `companyEmailsFor()`, e il form non le toglie.
 - Legami con una controparte non visibile (filtro delle controparti): in sola lettura in `sync()`, contatti di lavoro compresi.
-- Script del riquadro: i campi dell'altro tipo nascosti si disabilitano (niente validazione del browser bloccante); un'email storica non accettata dal browser e lasciata com'è non blocca l'invio.
+- Riquadro: i campi dell'altro tipo nascosti si disabilitano (niente validazione del browser bloccante, lo fa la lib); un'email storica non accettata dal browser e lasciata com'è non blocca l'invio.
 
 ### Added
 
@@ -37,7 +40,7 @@
 - «Si occupa di» sui contatti delle aziende: tabella `company_point_departments` (`Models\CompanyPointDepartment`, per valore, così l'area segue l'email quando cambia il principale), `ContactPoints::companyEmailsFor($companyId, $department = '')` per i destinatari a livello di azienda.
 - Contatti di lavoro del referente sul legame: `contact_relations.email`, `phone_prefix`, `phone`, colonne nei repeater dei legami (`HasContactRelations::workContactColumns()`), `ContactRelations::workContacts()` (formato senza DNS, valori non validi o non scalari vuoti, riga senza chiave tiene quelli di prima), `HasContactRelations::assertRelationContacts()` (DNS nel form), `contact_email` nelle letture. Mai email di accesso.
 - Indirizzi: ricerca anche per nome dell'attività (`withNameSearch()`) in fatturazione e consegna; place ID e coordinate anche sulla fatturazione di persone e aziende (`withGeo()`: colonne `place_id`, `lat`, `lng`), salvati dal backend, da `AccountBilling` e dalla registrazione solo se postati (`AccountBilling::geo()`); «Presso» (`business_name`) negli indirizzi di consegna di persone e aziende. Il nome dell'attività scelta riempie «Presso» (o la ragione sociale vuota di un'azienda).
-- Script dei form del modulo (`resources/assets/js/contact-form.js`, `Support\ContactFormScript`): colonne del riquadro per tipo, un principale per tipo a schermo, riga dell'email di accesso bloccata, nome dell'attività scelta. Supplisce a due mancanze di core e lib descritte nel README.
+- Script del riquadro «Contatti» (`resources/assets/js/contact-form.js`, `Support\ContactFormScript`): un principale per tipo a schermo, riga dell'email di accesso bloccata, email storiche non valide inviabili com'erano.
 
 ### Added
 

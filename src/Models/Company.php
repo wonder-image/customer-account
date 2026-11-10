@@ -32,7 +32,7 @@ class Company extends Model
      */
     public static function billing(): AddressExtension
     {
-        return AddressExtension::billing(countryDefault: 'IT')->withLink(false)->asBusiness()->withGeo()->withNameSearch();
+        return AddressExtension::billing(countryDefault: 'IT')->withLink(false)->asBusiness()->withGeo()->withNameSearch(nameKey: 'business_name');
     }
 
     public static function syncSchema(): ?SyncSchema

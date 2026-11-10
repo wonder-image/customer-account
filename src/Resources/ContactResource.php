@@ -49,8 +49,6 @@ class ContactResource extends Resource
         // Telefono ed email stanno nel riquadro «Contatti», non nei campi della fatturazione.
         $fields = array_diff_key(static::$model::billing()->formSchema(), ['phone_prefix' => true, 'phone' => true]);
         foreach (static::requiredKeys() as $key) { $fields[$key]->required(); }
-        // Un'attività cercata per nome dà la ragione sociale, se è vuota (lo script del modulo).
-        if (isset($fields['business_name'], $fields['street'])) { $fields['street']->attribute('data-ca-place-name="business_name"'); }
         return [
             ...array_values($fields),
             ...static::extraFormFields(),
@@ -65,7 +63,8 @@ class ContactResource extends Resource
         $widths = ['country' => 12, 'is_customer' => 6, 'is_supplier' => 6, 'street' => 9, 'number' => 3, 'province' => 4, 'city' => 5, 'cap' => 3, 'phone_prefix' => 3, 'phone' => 9, 'name' => 6, 'surname' => 6,
             'pi' => 6, 'sdi' => 6];
         $fields = array_map(static fn ($field) => $field->columnSpan($widths[$field->name] ?? 12), static::formSchema());
-        return (new Form)->columns(12)->components([(new Card)->columns(12)->columnSpan(12)->components([...$fields, static::contactFormScript()])]);
+        // Lo script del riquadro «Contatti» solo dove c'è il riquadro (non negli indirizzi, che estendono questa).
+        return (new Form)->columns(12)->components([(new Card)->columns(12)->columnSpan(12)->components([...$fields, ...(static::usesContactBox() ? [static::contactFormScript()] : [])])]);
     }
     public static function tableSchema(): array
     {

@@ -15,7 +15,9 @@ if (!function_exists('sqlSelect')) {
 
 use Wonder\Http\Csrf;
 use Wonder\Plugin\CustomerAccount\Account\ContactAccount;
+use Wonder\Backend\Support\ResourceFormLayoutRenderer;
 use Wonder\Plugin\CustomerAccount\Resources\CompanyResource;
+use Wonder\Plugin\CustomerAccount\Resources\ContactAddressResource;
 use Wonder\Plugin\CustomerAccount\Resources\ContactResource;
 use Wonder\Plugin\CustomerAccount\Support\ContactFormScript;
 use Wonder\Plugin\CustomerAccount\Support\ContactPoints;
@@ -295,7 +297,7 @@ check('aziende: le aree dei contatti tolti se ne vanno, anche con «Altri contat
         && $person['rows'][0]['departments'] === null;
 });
 
-check('Resource: riquadro con «Si occupa di» solo sulle aziende, script del modulo nel layout', function () {
+check('Resource: riquadro con «Si occupa di» solo sulle aziende, «Email di accesso» solo nella colonna della riga bloccata', function () {
     $columns = static function (string $resource): array {
         foreach ($resource::formSchema() as $field) {
             if ($field->name === 'contact_points') {
@@ -305,12 +307,78 @@ check('Resource: riquadro con «Si occupa di» solo sulle aziende, script del mo
 
         return [];
     };
-    $script = ContactFormScript::html();
 
-    return $columns(ContactResource::class) === ['kind', 'email', 'phone_prefix', 'phone', 'label', 'is_primary', 'locked']
-        && $columns(CompanyResource::class) === ['kind', 'email', 'phone_prefix', 'phone', 'label', 'is_primary', 'departments', 'locked']
-        && str_starts_with($script, '<script>') && substr_count($script, '</script>') === 1 && str_contains($script, 'caContactForm')
-        && str_contains($script, 'data-ca-point-kind') && ContactResource::usesContactBox() && CompanyResource::usesContactBox();
+    return $columns(ContactResource::class) === ['kind', 'email', 'phone_prefix', 'phone', 'label', 'locked', 'is_primary']
+        && $columns(CompanyResource::class) === ['kind', 'email', 'phone_prefix', 'phone', 'label', 'locked', 'is_primary', 'departments']
+        && ContactResource::usesContactBox() && CompanyResource::usesContactBox();
+});
+
+// La resa vera del riquadro: le regole del framework sui contenitori delle colonne, nelle righe salvate e nel modello della riga nuova.
+$box = static function (string $resource, array $rows): string {
+    require_once WI_APP_ROOT.'/app/function/other/geo.php';
+
+    foreach ($resource::formSchema() as $field) {
+        if ($field->name === 'contact_points') {
+            return $field->value($rows)->render('bootstrap');
+        }
+    }
+
+    return '';
+};
+$rule = static fn (string $mode, string $field, string $values): string => 'data-'.$mode.'-when="'.$field.'" data-'.$mode.'-when-values="'.$values.'" data-wi-conditional-container="true"';
+// Dal contenitore della colonna fino a poco dopo il campo.
+$column = static function (string $html, string $name): string {
+    $at = strpos($html, 'name="'.$name.'"');
+    $start = $at === false ? false : strrpos(substr($html, 0, $at), '<div class="col');
+
+    return $start === false ? '' : substr($html, $start, $at - $start + 400);
+};
+
+check('resa: email, prefisso e telefono compaiono per tipo (visibleWhen sulla colonna), nelle righe e nel modello; niente più attributi dello script', function () use ($box, $rule, $column) {
+    $html = $box(ContactResource::class, ContactPoints::formRows([
+        ['kind' => 'email', 'value' => 'ada@example.com', 'label' => 'access', 'is_primary' => true, 'locked' => true],
+        ['kind' => 'phone', 'value' => '3331112222', 'phone_prefix' => '+39', 'label' => 'work', 'is_primary' => true, 'locked' => false],
+    ]));
+    [$rows, $template] = explode('<template', $html, 2);
+    $ok = static function (string $part, string $row) use ($rule, $column): bool {
+        return str_starts_with($column($part, 'contact_points['.$row.'][email]'), '<div class="col-6" '.$rule('visible', 'kind', 'email'))
+            && str_starts_with($column($part, 'contact_points['.$row.'][phone_prefix]'), '<div class="col-2" '.$rule('visible', 'kind', 'phone'))
+            && str_starts_with($column($part, 'contact_points['.$row.'][phone]'), '<div class="col-4" '.$rule('visible', 'kind', 'phone'))
+            && str_starts_with($column($part, 'contact_points['.$row.'][label]'), '<div class="col-2" '.$rule('hidden', 'locked', '1'))
+            && str_starts_with($column($part, 'contact_points['.$row.'][locked]'), '<div class="col-2" '.$rule('visible', 'locked', '1'));
+    };
+
+    return $ok($rows, 'row_1') && $ok($rows, 'row_2') && $ok($template, '__ROW_KEY__')
+        && !str_contains($html, 'data-ca-point-only') && !str_contains($html, 'data-ca-place-name')
+        && str_contains($html, 'data-ca-point-kind') && str_contains($html, 'data-ca-point-primary') && str_contains($html, 'data-ca-point-locked');
+});
+
+check('resa: «Email di accesso» è selezionata solo nella riga bloccata e non si sceglie nelle etichette', function () use ($box, $column) {
+    $html = $box(CompanyResource::class, ContactPoints::formRows([
+        ['kind' => 'email', 'value' => 'info@rossi.test', 'label' => '', 'is_primary' => true, 'locked' => false],
+    ], true));
+    $person = $box(ContactResource::class, ContactPoints::formRows([
+        ['kind' => 'email', 'value' => 'ada@example.com', 'label' => 'access', 'is_primary' => true, 'locked' => true],
+    ]));
+
+    return str_contains($column($person, 'contact_points[row_1][locked]'), '<option value="1" selected>contacts.point_label_access</option>')
+        && !str_contains($column($html, 'contact_points[row_1][locked]'), 'value="1" selected')
+        && !str_contains($html.$person, '<option value="access"')
+        && str_contains($html, 'name="contact_points[row_1][departments][]"');
+});
+
+check('script: solo principale, riga bloccata ed email storiche; niente colonne per tipo né interni della lib; nel layout solo con il riquadro', function () {
+    require_once WI_APP_ROOT.'/app/function/other/geo.php';
+    $script = ContactFormScript::html();
+    $layout = static fn (string $resource): string => ResourceFormLayoutRenderer::render($resource::formLayoutSchema());
+
+    return str_starts_with($script, '<script>') && substr_count($script, '</script>') === 1 && str_contains($script, 'caContactForm')
+        && str_contains($script, 'data-ca-point-primary') && str_contains($script, 'data-ca-point-locked') && str_contains($script, 'typeMismatch')
+        && !str_contains($script, 'wiPlace') && !str_contains($script, 'wi-place') && !str_contains($script, 'data-ca-point-only')
+        && !str_contains($script, 'style.display') && !str_contains($script, 'MutationObserver') && !str_contains($script, 'option[value="access"]')
+        && substr_count($layout(ContactResource::class), 'window.caContactForm = true') === 1
+        && substr_count($layout(CompanyResource::class), 'window.caContactForm = true') === 1
+        && !str_contains($layout(ContactAddressResource::class), 'caContactForm');
 });
 
 summary();

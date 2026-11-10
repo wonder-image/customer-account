@@ -3,12 +3,14 @@
 namespace Wonder\Plugin\CustomerAccount\Support;
 
 /**
- * Lo script dei form della rubrica (`resources/assets/js/contact-form.js`):
- * righe del riquadro «Contatti» (colonne per tipo, un principale per tipo,
- * email di accesso bloccata) e nome dell'attività scelta da Google negli
- * indirizzi. Esce in linea: il modulo non ha un modo suo per servire file, e
- * così non dipende da dove sta installato. Il testo è del modulo, mai dati
- * della richiesta. Stampato due volte non fa danni: lo script parte una volta.
+ * Lo script del riquadro «Contatti» (`resources/assets/js/contact-form.js`):
+ * un principale per tipo a schermo, riga dell'email di accesso bloccata,
+ * email storiche non valide inviabili com'erano. Colonne per tipo e nome
+ * dell'attività negli indirizzi li fa il framework. Esce in linea: il modulo
+ * non ha un modo suo per servire file, e così non dipende da dove sta
+ * installato. Il testo è del modulo, mai dati della richiesta. Stampato due
+ * volte non fa danni: lo script parte una volta. Serve solo dove c'è il
+ * riquadro.
  */
 final class ContactFormScript
 {

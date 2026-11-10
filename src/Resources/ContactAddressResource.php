@@ -44,13 +44,13 @@ class ContactAddressResource extends ContactResource
     }
     /**
      * «Presso» (`business_name`) è l'attività o la società a quell'indirizzo:
-     * cercata per nome nella via, si riempie da sola se è vuota (lo script del
-     * modulo) e resta modificabile.
+     * cercata per nome nella via, si riempie da sola se è vuota (la lib, con
+     * `withNameSearch(nameKey:)`) e resta modificabile. Solo qui: l'area
+     * account non ha «Presso».
      */
     public static function formSchema(): array
     {
-        $fields = AccountAddressForm::fields(static::$model::address());
-        if (isset($fields['street'])) { $fields['street']->attribute('data-ca-place-name="business_name"'); }
+        $fields = AccountAddressForm::fields(static::$model::address()->withNameSearch(nameKey: 'business_name'));
         return [
             FormField::key(static::parentKey())->selectSearch(static::contactOptions())->required(),
             FormField::key('label')->text(),

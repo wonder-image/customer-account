@@ -167,6 +167,16 @@ check('riga del riquadro: la colonna dell\'altro tipo disabilitata (non postata)
     return $split['problems'] === [] && $split['columns'] === ['email' => 'a@rossi.test', 'phone_prefix' => '+39', 'phone' => '021234567'];
 });
 
+check('riga del riquadro: «locked» e l\'etichetta «access» postate a mano non bloccano niente e non danno «Email di accesso»', function () {
+    $split = ContactPoints::split(ContactPoints::CONTACT, [
+        ['kind' => 'email', 'email' => 'a@rossi.test', 'label' => 'access', 'locked' => '1', 'is_primary' => 'true'],
+    ]);
+    $row = $split['rows'][0] ?? [];
+
+    return $split['problems'] === [] && $split['columns']['email'] === 'a@rossi.test'
+        && ($row['label'] ?? null) === '' && empty($row['locked']);
+});
+
 check('aree orfane: l\'email principale cambiata dai campi singoli porta via le aree del valore vecchio; un contatto nuovo non le eredita', function () use ($seed) {
     $tables = $seed();
     $tables['company_point_departments'] = [

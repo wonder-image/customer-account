@@ -43,10 +43,17 @@ trait HasContactPoints
 
     /**
      * Il riquadro «Contatti»: tipo, email (o prefisso e numero), etichetta,
-     * principale e, per le aziende, «Si occupa di». La colonna dell'altro tipo
-     * la nasconde lo script del modulo (`contactFormScript()`), che spegne
-     * anche gli altri principali dello stesso tipo e blocca la riga
-     * dell'email di accesso; senza script il server applica le stesse regole.
+     * principale e, per le aziende, «Si occupa di».
+     *
+     * Le colonne dell'altro tipo le nasconde il framework (`visibleWhen('kind')`,
+     * cercato nella riga): nascoste sono anche spente, quindi il browser non
+     * le valida e non le posta, e tengono il valore. Sulla riga dell'email di
+     * accesso (`locked` = 1) al posto dell'etichetta compare «Email di
+     * accesso», che nelle altre righe non c'è. Le larghezze visibili fanno
+     * dodici per tutti e due i tipi. Lo script del modulo
+     * (`contactFormScript()`) fa il resto: un principale per tipo a schermo e
+     * la riga dell'email di accesso bloccata. Senza script il server applica
+     * le stesse regole.
      *
      * @return list<Input>
      */
@@ -59,20 +66,24 @@ trait HasContactPoints
         }
 
         $company = static::contactPointOwner() === ContactPoints::COMPANY;
-        $labels = ['' => '—'] + ContactPoints::labels() + [ContactPoints::ACCESS_LABEL => (string) __t('contacts.point_label_access')];
 
         return [
             FormField::key(static::$pointsInput)
                 ->repeater([
                     RepeaterColumn::key('kind')->select($kinds)->value(ContactPoints::EMAIL)->attribute('data-ca-point-kind')
                         ->label((string) __t('contacts.point_kind'))->columnSpan(2),
-                    RepeaterColumn::key('email')->email()->attribute('data-ca-point-only="email"')
+                    RepeaterColumn::key('email')->email()->visibleWhen('kind', ContactPoints::EMAIL)
                         ->label((string) __t('contacts.point_kind_email'))->columnSpan(6),
-                    RepeaterColumn::key('phone_prefix')->phonePrefix()->attribute('data-ca-point-only="phone"')
+                    RepeaterColumn::key('phone_prefix')->phonePrefix()->visibleWhen('kind', ContactPoints::PHONE)
                         ->label((string) __t('contacts.point_prefix'))->columnSpan(2),
-                    RepeaterColumn::key('phone')->tel()->attribute('data-ca-point-only="phone"')
+                    RepeaterColumn::key('phone')->tel()->visibleWhen('kind', ContactPoints::PHONE)
                         ->label((string) __t('contacts.point_kind_phone'))->columnSpan(4),
-                    RepeaterColumn::key('label')->select($labels)->value('')->attribute('data-ca-point-label')
+                    RepeaterColumn::key('label')->select(['' => '—'] + ContactPoints::labels())->value('')->hiddenWhen('locked', '1')
+                        ->label((string) __t('contacts.point_label'))->columnSpan(2),
+                    // Solo sulla riga dell'email di accesso, al posto dell'etichetta: si vede, non si sceglie.
+                    // Il server non legge `locked` dal POST (`ContactPoints::split()`).
+                    RepeaterColumn::key('locked')->select(['' => '—', '1' => (string) __t('contacts.point_label_access')])->value('')
+                        ->visibleWhen('locked', '1')->attribute('data-ca-point-locked')
                         ->label((string) __t('contacts.point_label'))->columnSpan(2),
                     RepeaterColumn::key('is_primary')
                         ->select(['false' => (string) __t('contacts.no'), 'true' => (string) __t('contacts.yes')])->value('false')
@@ -82,7 +93,6 @@ trait HasContactPoints
                         RepeaterColumn::key('departments')->selectSearch(ContactRelations::departments(), true)
                             ->label((string) __t('contacts.departments'))->columnSpan(12),
                     ] : []),
-                    RepeaterColumn::key('locked')->hidden()->attribute('data-ca-point-locked'),
                 ])
                 ->nested()
                 ->repeaterSortable()
@@ -128,9 +138,10 @@ trait HasContactPoints
     }
 
     /**
-     * Lo script del riquadro e della ricerca per nome negli indirizzi, da
-     * mettere una volta nel layout del form (una stringa: la stampa il
-     * renderer del layout). Vuoto se la pagina l'ha già.
+     * Lo script del riquadro «Contatti» (un principale per tipo, riga
+     * dell'email di accesso bloccata), da mettere una volta nel layout del
+     * form che mostra il riquadro (una stringa: la stampa il renderer del
+     * layout). Stampato due volte parte una volta.
      */
     public static function contactFormScript(): string
     {
