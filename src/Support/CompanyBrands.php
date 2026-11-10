@@ -20,11 +20,89 @@ use Wonder\Support\Text\Slug;
  * (`ended_at`) e si riapre se il brand torna, così i documenti vecchi
  * restano verificabili alla loro data. Emette `CompanyEvents::BRAND_CREATED`,
  * `BRAND_LINKED`, `BRAND_UNLINKED` e `BRAND_MERGED`.
+ *
+ * I dati del brand seguono `BrandData`; il brand kit si accende con
+ * `useKit()`, `byDomain()` riconosce il brand da un'email in arrivo.
  */
 final class CompanyBrands
 {
     /** @var array<string, string> ruoli aggiunti da moduli e siti: chiave => etichetta */
     private static array $extraRoles = [];
+
+    private static bool $kit = false;
+
+    /**
+     * Accende il «brand kit» nel form del brand (recapiti, social, colori,
+     * tono, …). Spento di default: il professionista non lo vede. Un modulo
+     * lo accende al boot.
+     */
+    public static function useKit(bool $enabled = true): void
+    {
+        self::$kit = $enabled;
+    }
+
+    /** Il form del brand mostra e accetta il brand kit? */
+    public static function kitEnabled(): bool
+    {
+        return self::$kit;
+    }
+
+    /**
+     * Il brand di un'email in arrivo o di un dominio («ordini@lapiana.it»,
+     * «https://www.lapiana.it»), dal campo `domain`: vale anche un
+     * sottodominio («news.lapiana.it»). Una casella generica (gmail.com,
+     * outlook.com, …: `BrandData::MAIL_PROVIDERS`) non corrisponde mai, né un
+     * brand archiviato. Se più brand hanno lo stesso dominio vince il brand
+     * principale delle sue linee; altrimenti non tira a indovinare: null.
+     *
+     * @return array<string, mixed>|null
+     */
+    public static function byDomain(string $emailOrDomain): ?array
+    {
+        $value = trim($emailOrDomain);
+        $at = strrpos($value, '@');
+        $domain = BrandData::domain($at !== false ? substr($value, $at + 1) : $value);
+
+        if ($domain === null || $domain === '' || BrandData::isMailProvider($domain)) {
+            return null;
+        }
+
+        // Dal più preciso al dominio di secondo livello: news.lapiana.it, lapiana.it.
+        $labels = explode('.', $domain);
+        $candidates = [];
+
+        for ($i = 0; $i < count($labels) - 1; $i++) {
+            $candidate = implode('.', array_slice($labels, $i));
+
+            if (!BrandData::isMailProvider($candidate)) {
+                $candidates[] = $candidate;
+            }
+        }
+
+        if ($candidates === []) {
+            return null;
+        }
+
+        $found = [];
+
+        foreach (self::rows(self::safe(static fn () => CompanyBrand::find(['domain' => $candidates, 'archived' => 'false'], null, 'id', 'ASC'))) as $row) {
+            $found[(string) $row['domain']][] = $row;
+        }
+
+        foreach ($candidates as $candidate) {
+            $rows = $found[$candidate] ?? [];
+
+            if (count($rows) === 1) {
+                return $rows[0];
+            }
+
+            if ($rows !== []) {
+                return self::familyHead($rows);
+            }
+        }
+
+        return null;
+    }
 
     /**
      * I brand per un select, per nome: quelli non archiviati, più gli
@@ -683,8 +761,9 @@ final class CompanyBrands
             ];
         }
 
-        // I referenti che seguivano un brand staccato non lo seguono più.
+        // I referenti che seguivano un brand staccato non lo seguono più, e gli indirizzi non valgono più per lui.
         ContactRelations::dropBrands($companyId, array_keys($gone));
+        CompanyAddresses::dropBrands($companyId, array_keys($gone));
 
         return [array_keys($wanted), $events];
     }
@@ -702,8 +781,9 @@ final class CompanyBrands
     }
 
     /**
-     * Unisce un doppione in un altro brand: i legami con le aziende e con i
-     * referenti passano al brand di arrivo, quello di partenza si archivia.
+     * Unisce un doppione in un altro brand: i legami con le aziende, con i
+     * referenti e con gli indirizzi passano al brand di arrivo, quello di
+     * partenza si archivia.
      * Se un'azienda ha già il brand di arrivo, tiene quel legame (riaperto se
      * serve, predefinito se lo era l'altro) e chiude l'altro. Emette
      * `BRAND_MERGED`: i moduli dipendenti rimappano lì i loro riferimenti.
@@ -759,6 +839,7 @@ final class CompanyBrands
 
             self::moveChildren($fromId, $intoId);
             ContactRelations::moveBrand($fromId, $intoId);
+            CompanyAddresses::moveBrand($fromId, $intoId);
             self::archive($fromId);
         });
 
@@ -805,6 +886,30 @@ final class CompanyBrands
 
             return $out;
         });
+    }
+
+    /**
+     * Fra più brand con lo stesso dominio, il padre se gli altri sono sue
+     * linee; altrimenti null.
+     *
+     * @param list<array<string, mixed>> $rows
+     * @return array<string, mixed>|null
+     */
+    private static function familyHead(array $rows): ?array
+    {
+        $heads = array_values(array_filter($rows, static fn (array $row): bool => self::parentId($row) === 0));
+
+        if (count($heads) !== 1) {
+            return null;
+        }
+
+        foreach ($rows as $row) {
+            if ($row !== $heads[0] && self::parentId($row) !== (int) $heads[0]['id']) {
+                return null;
+            }
+        }
+
+        return $heads[0];
     }
 
     /** @param array<int, array<string, mixed>> $byId */

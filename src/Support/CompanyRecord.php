@@ -12,11 +12,14 @@ use Wonder\Plugin\CustomerAccount\Models\CompanyBrand;
  * `slug`, `name`, `role`, `is_default`, `parent_id`, `parent_code`).
  * `SCHEMA` 3: dalla 2 i brand portano codice, slug, ruolo, predefinito e
  * brand principale, l'azienda la capogruppo. Senza padre: 0 e stringa vuota.
+ * `SCHEMA` 4: i brand portano i loro dati (`BrandData::fromRow()`: logo come
+ * percorso e URL, sito, dominio, descrizione e i campi del kit, anche se il
+ * kit è spento); l'azienda `emails` e `phones`, i referenti `departments`.
  */
 final class CompanyRecord extends PartyRecord
 {
     public const ENTITY = 'company';
-    public const SCHEMA = 3;
+    public const SCHEMA = 4;
 
     public static function entity(): string
     {
@@ -64,7 +67,7 @@ final class CompanyRecord extends PartyRecord
                 'is_default' => $link['is_default'],
                 'parent_id' => isset($parents[$parentId]) ? $parentId : 0,
                 'parent_code' => $parents[$parentId] ?? '',
-            ];
+            ] + BrandData::fromRow($link['brand']);
         }, $links);
 
         return $record;

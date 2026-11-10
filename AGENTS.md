@@ -32,6 +32,21 @@ Le convenzioni del framework sono in `vendor/wonder-image/app/AGENTS.md`.
   (`HasCompanyBrands`, senza `RepeaterRelation`): legami azienda/brand solo da
   `CompanyBrands` (`sync()`, `merge()`), brand seguiti dai referenti solo da
   `ContactRelations` (`sync()` con `brand_ids`, `setBrands()`, `moveBrand()`).
+- Regola di prodotto: «vuoto = tutti». Un referente senza aree si occupa di
+  tutto (`contact_relation_departments`, scritte solo da `ContactRelations`:
+  `sync()` con `departments`, `setDepartments()`), senza brand li segue tutti;
+  un indirizzo senza brand vale per tutti (`company_address_brands`, solo da
+  `CompanyAddresses`). Chi sceglie i destinatari di un documento usa
+  `ContactRelations::peopleFor()`. Accesso, principale e `receives_documents`
+  restano sul legame: l'accesso non deriva mai dall'area.
+- Recapiti in più (`contact_points` / `company_points`) solo da
+  `ContactPoints`; email e telefono principali restano colonne della scheda.
+  Il collegamento account↔scheda e ogni ricerca della scheda per email usano
+  solo `contacts.email`: mai un recapito in più (c'è un test).
+- Dati del brand e brand kit: regole in `BrandData` (URL solo http/https,
+  colori esadecimali, social da lista), kit visibile solo con
+  `CompanyBrands::useKit()`; il logo passa solo come file caricato.
+  `CompanyBrands::byDomain()` non riconosce mai una casella generica.
 - Brand: `code` (`cbr_`) e `slug` univoci e immutabili, `name_key` per i
   doppioni; un legame staccato si chiude (`ended_at`), non si cancella; un
   brand doppione si unisce (`merge()`, evento `company.brand_merged`) e si
@@ -45,14 +60,16 @@ Le convenzioni del framework sono in `vendor/wonder-image/app/AGENTS.md`.
   porta, e `CompanyBrandResource`). Il committente di un progetto si salva con
   `Commissioner::resolve()`.
 - Integrazioni: `ContactRecord` / `CompanyRecord` (base `PartyRecord`,
-  `SCHEMA` 2, `CompanyRecord` 3, `entity_type` `contact` / `company`). Se
+  `SCHEMA` 3, `CompanyRecord` 4, `entity_type` `contact` / `company`). Se
   cambia la forma, alzare `SCHEMA` della classe che cambia.
 - Export: le Resource su `contacts` e `companies` usano `ContactExport::FORMATS` /
   `columns()` con `downloadAsText()`; niente colonne duplicate per Resource.
 - Le Resource sono fallback di tabella: gestionale e sito hanno la precedenza e
   il menu non deve duplicare la voce.
 - Migrazioni solo in `database.migrations`, idempotenti, con
-  `LegacyTableRenames`; niente drop né merge. Eccezione: `CompanySplitMigration`
+  `LegacyTableRenames`; niente drop né merge. Una colonna tolta dallo schema
+  la cancella `runTables()`, che gira dopo le migrazioni: i dati si copiano
+  prima, in una migrazione (`RelationDepartmentsMigration`). Eccezione: `CompanySplitMigration`
   sposta le aziende da `contacts` a `companies` (soft delete della scheda
   vecchia) e scrive `contact_company_map`, che i moduli dipendenti leggono per
   rimappare i loro riferimenti. Gira prima di `runTables()`; deve restare

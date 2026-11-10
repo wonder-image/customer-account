@@ -4,9 +4,12 @@ namespace Wonder\Plugin\CustomerAccount\Resources;
 
 use InvalidArgumentException;
 use Wonder\App\Resource;
-use Wonder\App\ResourceSchema\{ApiSchema, FormField, NavigationSchema, PageSchema, PermissionSchema, TableColumn};
+use Wonder\App\ResourceSchema\{ApiSchema, FormField, NavigationSchema, PageSchema, PermissionSchema, RepeaterColumn, TableColumn};
 use Wonder\Backend\Support\QuickCreateStore;
+use Wonder\Elements\Components\{Card, SectionTitle};
+use Wonder\Elements\Form\Form;
 use Wonder\Plugin\CustomerAccount\Models\CompanyBrand;
+use Wonder\Plugin\CustomerAccount\Support\BrandData;
 use Wonder\Plugin\CustomerAccount\Support\CompanyBrands;
 use Wonder\Plugin\CustomerAccount\Support\ContactRelations;
 
@@ -16,6 +19,9 @@ use Wonder\Plugin\CustomerAccount\Support\ContactRelations;
  * `CompanyBrands::findOrCreate()`: un nome che c'è già riprende quel brand.
  * Codice e slug nascono alla creazione e non cambiano; un brand si archivia
  * dal suo form (campo «Archiviato») e il form avvisa dei nomi simili.
+ *
+ * Il form ha due gruppi: i dati per tutti (logo, sito, dominio, descrizione)
+ * e il «brand kit», che compare e si salva solo se `CompanyBrands::kitEnabled()`.
  *
  * Un modulo che usa altri ruoli la estende e cambia `permissionSchema()`.
  */
@@ -32,23 +38,106 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
     }
     public static function labelSchema(): array
     {
-        return [
+        $labels = [
             'name' => (string) __t('contacts.brand_name'),
             'note' => (string) __t('contacts.note'),
             'archived' => (string) __t('contacts.brand_archived'),
             'parent_id' => (string) __t('contacts.brand_parent'),
+            'logo' => (string) __t('contacts.brand_logo'),
         ];
+
+        foreach ([...BrandData::BASE_FIELDS, ...BrandData::KIT_FIELDS] as $field) {
+            $labels[$field] = (string) __t('contacts.brand_'.$field);
+        }
+
+        return $labels;
     }
     public static function formSchema(): array
     {
         $yesNo = ['false' => (string) __t('contacts.no'), 'true' => (string) __t('contacts.yes')];
+        $labels = static::labelSchema();
+        $fields = [
+            FormField::key('name')->text()->label($labels['name'])->required(),
+            FormField::key('parent_id')->selectSearch(['' => '—'] + CompanyBrands::parentOptions())->label($labels['parent_id']),
+            FormField::key('logo')->fileDragDrop('image')->label($labels['logo']),
+            FormField::key('website')->text()->label($labels['website']),
+            FormField::key('domain')->text()->label($labels['domain']),
+            FormField::key('description')->textarea()->label($labels['description']),
+            FormField::key('note')->textarea()->label($labels['note']),
+            FormField::key('archived')->select($yesNo)->value('false')->label($labels['archived']),
+        ];
+
+        if (!CompanyBrands::kitEnabled()) {
+            return $fields;
+        }
 
         return [
-            FormField::key('name')->text()->label(static::labelSchema()['name'])->required(),
-            FormField::key('parent_id')->selectSearch(['' => '—'] + CompanyBrands::parentOptions())->label(static::labelSchema()['parent_id']),
-            FormField::key('note')->textarea()->label(static::labelSchema()['note']),
-            FormField::key('archived')->select($yesNo)->value('false')->label(static::labelSchema()['archived']),
+            ...$fields,
+            FormField::key('email')->email()->label($labels['email']),
+            FormField::key('phone_prefix')->text()->label($labels['phone_prefix']),
+            FormField::key('phone')->text()->label($labels['phone']),
+            FormField::key('socials')
+                ->repeater([
+                    RepeaterColumn::key('network')->select(BrandData::socials())->label((string) __t('contacts.brand_social_network'))->columnSpan(4),
+                    RepeaterColumn::key('url')->text()->label((string) __t('contacts.brand_social_url'))->columnSpan(8),
+                ])
+                ->nested()
+                ->repeaterAddLabel((string) __t('contacts.brand_social_add'))
+                ->label($labels['socials']),
+            FormField::key('colors')->text()->label($labels['colors']),
+            FormField::key('tone')->textarea()->label($labels['tone']),
+            FormField::key('sector')->text()->label($labels['sector']),
+            FormField::key('language')->text()->label($labels['language']),
+            FormField::key('assets_url')->text()->label($labels['assets_url']),
         ];
+    }
+    /** Due gruppi: i dati del brand e, se acceso, il brand kit. */
+    public static function formLayoutSchema(): ?Form
+    {
+        $widths = ['phone_prefix' => 3, 'phone' => 9, 'website' => 8, 'domain' => 4, 'sector' => 8, 'language' => 4];
+        $kit = array_flip(BrandData::KIT_FIELDS);
+        $groups = [[], []];
+
+        foreach (static::formSchema() as $field) {
+            $groups[isset($kit[$field->name]) ? 1 : 0][] = $field->columnSpan($widths[$field->name] ?? 12);
+        }
+
+        $cards = [(new Card)->columns(12)->columnSpan(12)->components([SectionTitle::make((string) __t('contacts.brand_group_base'))->columnSpan(12), ...$groups[0]])];
+
+        if ($groups[1] !== []) {
+            $cards[] = (new Card)->columns(12)->columnSpan(12)->components([
+                SectionTitle::make((string) __t('contacts.brand_group_kit'))->tooltip((string) __t('contacts.brand_group_kit_tooltip'))->columnSpan(12),
+                ...$groups[1],
+            ]);
+        }
+
+        return (new Form)->columns(12)->components($cards);
+    }
+    /** Social e colori stanno in JSON: nel form tornano righe e testo. */
+    public static function mutateFormValues(array $values, string $mode, string $context = 'backend'): array
+    {
+        foreach (['socials', 'colors'] as $field) {
+            if (isset($values[$field]) && is_string($values[$field])) {
+                $decoded = json_decode($values[$field], true);
+                $values[$field] = is_array($decoded) ? $decoded : [];
+            }
+        }
+
+        if (isset($values['socials']) && is_array($values['socials']) && !array_is_list($values['socials'])) {
+            $rows = [];
+
+            foreach ($values['socials'] as $network => $url) {
+                $rows[] = ['network' => (string) $network, 'url' => (string) $url];
+            }
+
+            $values['socials'] = $rows;
+        }
+
+        if (isset($values['colors']) && is_array($values['colors'])) {
+            $values['colors'] = implode(', ', array_filter($values['colors'], 'is_string'));
+        }
+
+        return parent::mutateFormValues($values, $mode, $context);
     }
     public static function tableSchema(): array
     {
@@ -86,11 +175,37 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
      * nome cambia: un doppione storico (o il brand archiviato da `merge()`)
      * si può ancora correggere e archiviare. Un brand che resta archiviato
      * non si controlla. Il brand principale (`parent_id`) passa dalle regole
-     * di `CompanyBrands::parentProblem()`: un livello solo.
+     * di `CompanyBrands::parentProblem()`: un livello solo. I dati del brand
+     * passano dalle regole di `BrandData` (URL solo http/https, colori
+     * esadecimali, social della lista); il kit solo se è acceso. Il logo passa
+     * solo come file caricato: il framework ne controlla estensione e
+     * dimensione e ripulisce un SVG.
      */
     public static function mutateRequestValues(array $values, string $action, string $context = 'backend', ?array $oldValues = null): array
     {
-        $values = array_intersect_key($values, static::labelSchema());
+        $upload = $values['logo'] ?? null;
+        $manifest = $values['logo__wi_files'] ?? null;
+        [$data, $problems] = BrandData::clean($values, CompanyBrands::kitEnabled());
+
+        if ($problems !== []) {
+            $labels = static::labelSchema();
+            throw new InvalidArgumentException(implode("\n", array_map(
+                static fn (string $field): string => (string) __t('contacts.brand_invalid', ['field' => $labels[$field] ?? $field]),
+                array_keys($problems)
+            )));
+        }
+
+        $values = $data + array_intersect_key($values, array_flip(['name', 'note', 'archived', 'parent_id']));
+
+        // Un file o il suo ordine, mai un testo: un percorso o un URL scritti a mano non diventano il logo.
+        if (is_array($upload) && isset($upload['name'])) {
+            $values['logo'] = $upload;
+        }
+
+        if (is_string($manifest)) {
+            $values['logo__wi_files'] = $manifest;
+        }
+
         $name = trim((string) ($values['name'] ?? ''));
         $id = (int) ($oldValues['id'] ?? 0);
 
