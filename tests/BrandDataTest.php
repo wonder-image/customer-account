@@ -131,7 +131,30 @@ check('form del brand: due gruppi, il kit solo se acceso; URL non validi rifiuta
         && $values['website'] === 'https://lapiana.it' && $values['domain'] === 'lapiana.it' && !isset($values['email']) && !isset($values['colors'])
         && $bad === 'contacts.brand_invalid' && $badColor === 'contacts.brand_invalid'
         && $kit['email'] === 'x@lapiana.it' && $kit['colors'] === '["#ffffff","#000000"]' && $kit['socials'] === '{"instagram":"https://instagram.com/lapiana"}'
-        && $form['colors'] === '#ffffff, #000000' && $form['socials'] === [['network' => 'instagram', 'url' => 'https://instagram.com/lapiana']];
+        && $form['colors'] === [['color' => '#ffffff'], ['color' => '#000000']] && $form['socials'] === [['network' => 'instagram', 'url' => 'https://instagram.com/lapiana']];
+});
+
+check('domini, recapiti, settore e lingua: liste pulite, primo valore nelle colonne singole, vecchi record riletti', function () use ($brand) {
+    $domains = BrandData::domains(['row_1' => ['domain' => 'LaPiana.it'], 'row_2' => ['domain' => 'https://www.lapiana.it/x'], 'row_3' => ['domain' => 'piana.com'], 'row_4' => ['domain' => '']]);
+    $contacts = BrandData::contacts([
+        ['kind' => 'email', 'email' => 'Ordini@LaPiana.it', 'label' => 'Ordini'],
+        ['kind' => 'phone', 'phone_prefix' => '+39', 'phone' => '02 123 456'],
+        ['kind' => 'email', 'email' => 'ordini@lapiana.it'],
+        ['kind' => 'email', 'email' => ''],
+    ]);
+    $badContact = BrandData::contacts([['kind' => 'email', 'email' => 'non-una-email']]);
+    [$clean, $errors] = BrandData::clean(['domains' => [['domain' => 'lapiana.it'], ['domain' => 'piana.com']], 'contacts' => [['kind' => 'email', 'email' => 'x@lapiana.it'], ['kind' => 'phone', 'phone_prefix' => '+39', 'phone' => '02123456']]], true);
+    $legacy = $brand(1, 'La Piana', ['domain' => 'lapiana.it', 'email' => 'x@lapiana.it', 'phone_prefix' => '+39', 'phone' => '02123456']);
+
+    return $domains === ['lapiana.it', 'piana.com'] && $errors === []
+        && $contacts === [['kind' => 'email', 'email' => 'ordini@lapiana.it', 'label' => 'Ordini'], ['kind' => 'phone', 'phone_prefix' => '+39', 'phone' => '02123456', 'label' => '']]
+        && $badContact === null
+        && $clean['domain'] === 'lapiana.it' && json_decode($clean['domains'], true) === ['lapiana.it', 'piana.com']
+        && $clean['email'] === 'x@lapiana.it' && $clean['phone'] === '02123456' && $clean['phone_prefix'] === '+39'
+        && BrandData::domainsOf($legacy) === ['lapiana.it']
+        && count(BrandData::contactsOf($legacy)) === 2
+        && BrandData::sector('c') === 'C' && BrandData::sector('Ristorazione') === 'Ristorazione' && count(BrandData::sectors()) === 21
+        && isset(BrandData::languages()['it']) && BrandData::DEFAULT_LANGUAGE === 'it';
 });
 
 check('logo: passa solo un file caricato; nel record è un percorso, mai un URL o un percorso scritti a mano', function () use ($brand) {

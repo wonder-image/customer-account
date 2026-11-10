@@ -26,11 +26,12 @@ use Wonder\Sql\TableSchema as Column;
  * `parent_id` fa del brand una linea di un altro (0 = nessuno): un livello
  * solo, con le regole di `CompanyBrands::parentProblem()`.
  *
- * I dati del brand (logo, sito, dominio, descrizione) e il «brand kit»
+ * I dati del brand (logo, sito, domini email, descrizione) e il «brand kit»
  * (recapiti, social, colori, tono, settore, lingua, materiali) seguono le
  * regole di `Support\BrandData`. Il logo è un'immagine caricata dal framework
- * (un SVG lo ripulisce `uploadFiles()` del core); `socials` e `colors` sono
- * JSON scritti già validati.
+ * (un SVG lo ripulisce `uploadFiles()` del core); `domains`, `contacts`,
+ * `socials` e `colors` sono JSON scritti già validati. `domain`, `email`,
+ * `phone_prefix` e `phone` tengono il primo valore delle liste.
  */
 class CompanyBrand extends Model
 {
@@ -60,7 +61,9 @@ class CompanyBrand extends Model
             Column::key('logo')->json(),
             Column::key('website')->length(255),
             Column::key('domain')->length(190),
+            Column::key('domains')->type('TEXT'),
             Column::key('description')->type('TEXT'),
+            Column::key('contacts')->type('TEXT'),
             Column::key('email')->length(190),
             Column::key('phone_prefix')->length(8),
             Column::key('phone')->length(30),
@@ -103,7 +106,9 @@ class CompanyBrand extends Model
             // URL, dominio, recapiti, social e colori arrivano già validati da `BrandData`.
             Field::key('website')->text()->sanitize(false),
             Field::key('domain')->text()->sanitize(false),
+            Field::key('domains')->text()->sanitize(false),
             Field::key('description')->text(),
+            Field::key('contacts')->text()->sanitize(false),
             Field::key('email')->text()->sanitize(false),
             Field::key('phone_prefix')->text()->sanitize(false),
             Field::key('phone')->text()->sanitize(false),

@@ -6,22 +6,46 @@ use Wonder\Plugin\CustomerAccount\Models\CompanyBrand;
 
 /**
  * I dati di un brand oltre al nome: le regole per scriverli e la forma per
- * leggerli. Due gruppi: quelli per tutti (`logo`, `website`, `domain`,
- * `description`) e il «brand kit» (`email`, telefono, `socials`, `colors`,
- * `tone`, `sector`, `language`, `assets_url`), che si mostra solo se un modulo
- * lo accende (`CompanyBrands::useKit()`).
+ * leggerli. Due gruppi: quelli per tutti (`logo`, `website`, `domains`,
+ * `description`) e il «brand kit» (`contacts`, `socials`, `colors`, `tone`,
+ * `sector`, `language`, `assets_url`), che si mostra solo se un modulo lo
+ * accende (`CompanyBrands::useKit()`).
  *
- * Ogni URL è http o https (mai `javascript:`, `data:`…), i colori sono
- * esadecimali, i social hanno chiavi di una lista estendibile. Tutti i
- * valori restano testo: chi li stampa li escapa.
+ * `domains` (i domini email) e `contacts` (email e telefoni) sono liste in
+ * JSON; le colonne `domain`, `email`, `phone_prefix`, `phone` tengono il primo
+ * valore, per chi le legge già (sync, record, ricerche). Chi scrive ancora
+ * solo `domain` o `email` / `phone` aggiorna quelle colonne.
+ *
+ * Il settore è una sezione ATECO / NACE (`A`…`U`, `SECTORS`); la lingua un
+ * codice ISO 639-1 (`LANGUAGES`, estendibile). Ogni URL è http o https (mai
+ * `javascript:`, `data:`…), i colori sono esadecimali, i social hanno chiavi
+ * di una lista estendibile. Tutti i valori restano testo: chi li stampa li
+ * escapa.
  */
 final class BrandData
 {
     /** I campi per tutti; il logo è un file e lo carica il framework. */
-    public const BASE_FIELDS = ['website', 'domain', 'description'];
+    public const BASE_FIELDS = ['website', 'domains', 'domain', 'description'];
 
-    /** I campi del brand kit. */
-    public const KIT_FIELDS = ['email', 'phone_prefix', 'phone', 'socials', 'colors', 'tone', 'sector', 'language', 'assets_url'];
+    /** I campi del brand kit; `email`, `phone_prefix`, `phone` sono il primo dei `contacts`. */
+    public const KIT_FIELDS = ['contacts', 'email', 'phone_prefix', 'phone', 'socials', 'colors', 'tone', 'sector', 'language', 'assets_url'];
+
+    /** Le sezioni ATECO 2025 / NACE Rev. 2.1: la stessa lettera in tutta l'UE. */
+    public const SECTORS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U'];
+
+    /** Le lingue di base (ISO 639-1); altre con `addLanguage()`. */
+    public const LANGUAGES = [
+        'it', 'en', 'de', 'fr', 'es', 'pt', 'nl', 'pl', 'ro', 'el', 'cs', 'sk', 'sl', 'hr', 'hu', 'bg',
+        'sv', 'da', 'fi', 'no', 'et', 'lv', 'lt', 'ga', 'mt', 'sq', 'sr', 'uk', 'ru', 'tr', 'ar', 'he',
+        'zh', 'ja', 'ko', 'hi',
+    ];
+
+    /** La lingua proposta a un brand nuovo. */
+    public const DEFAULT_LANGUAGE = 'it';
+
+    /** Al massimo tanti domini email e tanti recapiti in un brand. */
+    public const MAX_DOMAINS = 10;
+    public const MAX_CONTACTS = 20;
 
     /** I social di base; altri con `addSocial()`. */
     public const SOCIALS = ['facebook', 'instagram', 'linkedin', 'x', 'tiktok', 'youtube', 'pinterest', 'whatsapp'];
@@ -70,6 +94,54 @@ final class BrandData
 
     /** @var list<string> social e servizi di siti aggiunti */
     private static array $extraSiteHosts = [];
+
+    /** @var array<string, string> lingue aggiunte: codice => etichetta */
+    private static array $extraLanguages = [];
+
+    /**
+     * I settori per un select: lettera => «A · Agricoltura, …».
+     *
+     * @return array<string, string>
+     */
+    public static function sectors(): array
+    {
+        $out = [];
+
+        foreach (self::SECTORS as $code) {
+            $out[$code] = $code.' · '.(string) __t('contacts.brand_sector_'.strtolower($code));
+        }
+
+        return $out;
+    }
+
+    /**
+     * Le lingue per un select: codice => nome nella lingua del backend
+     * (`Locale` di intl se c'è, altrimenti il codice).
+     *
+     * @return array<string, string>
+     */
+    public static function languages(): array
+    {
+        $out = [];
+        $display = class_exists(\Locale::class) && function_exists('__l') ? (string) __l() : 'it';
+
+        foreach (self::LANGUAGES as $code) {
+            $name = class_exists(\Locale::class) ? (string) \Locale::getDisplayLanguage($code, $display) : '';
+            $out[$code] = $name !== '' && $name !== $code ? mb_convert_case($name, MB_CASE_TITLE, 'UTF-8') : strtoupper($code);
+        }
+
+        return $out + self::$extraLanguages;
+    }
+
+    /** Aggiunge una lingua (es. `ca` => «Catalano»). */
+    public static function addLanguage(string $code, string $label): void
+    {
+        $code = self::language($code);
+
+        if ($code !== null && $code !== '') {
+            self::$extraLanguages[$code] = $label;
+        }
+    }
 
     /**
      * I social per un select: quelli di base e quelli aggiunti.
@@ -226,6 +298,11 @@ final class BrandData
         $out = [];
 
         foreach ((array) $items as $item) {
+            // Una riga del repeater dei colori: `['color' => '#1a2b3c']`.
+            if (is_array($item) && array_key_exists('color', $item)) {
+                $item = $item['color'];
+            }
+
             $item = is_scalar($item) ? strtolower(trim((string) $item)) : null;
 
             if ($item === '') {
@@ -277,6 +354,109 @@ final class BrandData
         return $out;
     }
 
+    /**
+     * I domini email del brand: da righe `domain` (il repeater), da una lista
+     * o da un testo separato da virgole. Senza doppioni, al massimo
+     * `MAX_DOMAINS`. Null se uno non va.
+     *
+     * @return list<string>|null
+     */
+    public static function domains(mixed $value): ?array
+    {
+        $items = is_array($value) ? $value : preg_split('/[\s,;]+/', is_scalar($value) ? (string) $value : '');
+        $out = [];
+
+        foreach ((array) $items as $item) {
+            $domain = self::domain(is_array($item) ? ($item['domain'] ?? '') : $item);
+
+            if ($domain === null) {
+                return null;
+            }
+
+            if ($domain !== '' && !in_array($domain, $out, true)) {
+                $out[] = $domain;
+            }
+        }
+
+        return count($out) > self::MAX_DOMAINS ? null : $out;
+    }
+
+    /**
+     * I recapiti del brand: righe `kind` (`email` / `phone`), `email` oppure
+     * `phone_prefix` + `phone`, `label` facoltativa. Le righe vuote si
+     * saltano, i doppioni pure. Null se una riga non va o sono troppe.
+     *
+     * @return list<array{kind: string, email?: string, phone_prefix?: string, phone?: string, label: string}>|null
+     */
+    public static function contacts(mixed $value): ?array
+    {
+        $out = [];
+        $seen = [];
+
+        foreach (is_array($value) ? $value : [] as $row) {
+            if (!is_array($row)) {
+                return null;
+            }
+
+            $kind = is_scalar($row['kind'] ?? null) ? (string) $row['kind'] : '';
+            $label = self::text($row['label'] ?? '', 60);
+
+            if ($label === null) {
+                return null;
+            }
+
+            if ($kind === ContactPoints::PHONE) {
+                $phone = ContactPoints::phoneNumber($row['phone'] ?? '');
+                $prefix = ContactPoints::phonePrefix($row['phone_prefix'] ?? '');
+
+                if ($phone === null || $prefix === null) {
+                    return null;
+                }
+
+                if ($phone === '') {
+                    continue;
+                }
+
+                $item = ['kind' => $kind, 'phone_prefix' => $prefix, 'phone' => $phone, 'label' => $label];
+                $key = $kind.$prefix.$phone;
+            } elseif ($kind === ContactPoints::EMAIL || $kind === '') {
+                $email = self::email($row['email'] ?? '');
+
+                if ($email === null) {
+                    return null;
+                }
+
+                if ($email === '') {
+                    continue;
+                }
+
+                $item = ['kind' => ContactPoints::EMAIL, 'email' => $email, 'label' => $label];
+                $key = 'email'.$email;
+            } else {
+                return null;
+            }
+
+            if (!isset($seen[$key])) {
+                $seen[$key] = true;
+                $out[] = $item;
+            }
+        }
+
+        return count($out) > self::MAX_CONTACTS ? null : $out;
+    }
+
+    /** Un settore: la lettera di una sezione (`c` → `C`) o un testo libero di prima, o vuoto. */
+    public static function sector(mixed $value): ?string
+    {
+        $value = self::text($value, 100);
+
+        if ($value === null || $value === '') {
+            return $value;
+        }
+
+        return in_array(strtoupper($value), self::SECTORS, true) ? strtoupper($value) : $value;
+    }
+
     /** Una lingua come `it` o `it-IT`, o vuoto. Null se non va. */
     public static function language(mixed $value): ?string
     {
@@ -318,13 +498,15 @@ final class BrandData
             $clean = match ($field) {
                 'website', 'assets_url' => self::url($raw),
                 'domain' => self::domain($raw),
+                'domains' => self::json(self::domains($raw)),
+                'contacts' => self::json(self::contacts($raw)),
                 'email' => self::email($raw),
                 'phone_prefix' => ContactPoints::phonePrefix($raw),
                 'phone' => ContactPoints::phoneNumber($raw),
                 'colors' => self::json(self::colors($raw)),
                 'socials' => self::json(self::socialLinks($raw)),
                 'language' => self::language($raw),
-                'sector' => self::text($raw, 100),
+                'sector' => self::sector($raw),
                 default => self::text($raw, 2000),
             };
 
@@ -336,12 +518,37 @@ final class BrandData
             $out[$field] = $clean;
         }
 
-        if (($out['domain'] ?? '') === '' && ($out['website'] ?? '') !== '' && !isset($errors['domain'])) {
+        // La lista vince sulla colonna singola: `domain` è il primo dominio.
+        if (array_key_exists('domains', $out)) {
+            $out['domain'] = (string) ((self::decodeList($out['domains'])[0]) ?? '');
+        }
+
+        if (($out['domain'] ?? '') === '' && ($out['website'] ?? '') !== '' && !isset($errors['domain']) && !isset($errors['domains'])) {
             $domain = (string) self::domain($out['website']);
 
             if ($domain !== '' && !self::isMailProvider($domain) && !self::isSiteHost($domain)) {
                 $out['domain'] = $domain;
+
+                if (array_key_exists('domains', $out)) {
+                    $out['domains'] = (string) self::json([$domain]);
+                }
             }
+        }
+
+        // I recapiti in lista; le colonne singole tengono la prima email e il primo telefono.
+        if (array_key_exists('contacts', $out)) {
+            $first = ['email' => '', 'phone_prefix' => '', 'phone' => ''];
+
+            foreach (self::decodeList($out['contacts']) as $row) {
+                if (($row['kind'] ?? '') === ContactPoints::EMAIL && $first['email'] === '') {
+                    $first['email'] = (string) $row['email'];
+                } elseif (($row['kind'] ?? '') === ContactPoints::PHONE && $first['phone'] === '') {
+                    $first['phone_prefix'] = (string) $row['phone_prefix'];
+                    $first['phone'] = (string) $row['phone'];
+                }
+            }
+
+            $out = $first + $out;
         }
 
         return [$out, $errors];
@@ -358,12 +565,15 @@ final class BrandData
     {
         $socials = json_decode((string) ($brand['socials'] ?? ''), true);
         $colors = json_decode((string) ($brand['colors'] ?? ''), true);
+
         return [
             'logo' => CompanyBrand::logoPath($brand),
             'logo_url' => CompanyBrand::logoUrl($brand),
             'website' => (string) (self::url($brand['website'] ?? '') ?? ''),
             'domain' => (string) ($brand['domain'] ?? ''),
+            'domains' => self::domainsOf($brand),
             'description' => self::decoded($brand['description'] ?? ''),
+            'contacts' => self::contactsOf($brand),
             'email' => (string) ($brand['email'] ?? ''),
             'phone_prefix' => (string) ($brand['phone_prefix'] ?? ''),
             'phone' => (string) ($brand['phone'] ?? ''),
@@ -375,6 +585,48 @@ final class BrandData
             'language' => (string) ($brand['language'] ?? ''),
             'assets_url' => (string) (self::url($brand['assets_url'] ?? '') ?? ''),
         ];
+    }
+
+    /**
+     * I domini email di una riga: la lista, più la colonna `domain` se un
+     * vecchio scrittore l'ha cambiata da sola.
+     *
+     * @return list<string>
+     */
+    public static function domainsOf(array $brand): array
+    {
+        $list = self::domains(self::decodeList($brand['domains'] ?? '')) ?? [];
+        $single = (string) (self::domain($brand['domain'] ?? '') ?? '');
+
+        return $single !== '' && !in_array($single, $list, true) ? [$single, ...$list] : $list;
+    }
+
+    /**
+     * I recapiti di una riga: la lista o, se è vuota, l'email e il telefono
+     * delle colonne singole (i brand di prima).
+     *
+     * @return list<array<string, string>>
+     */
+    public static function contactsOf(array $brand): array
+    {
+        $list = self::contacts(self::decodeList($brand['contacts'] ?? '')) ?? [];
+
+        if ($list !== []) {
+            return $list;
+        }
+
+        return self::contacts([
+            ['kind' => ContactPoints::EMAIL, 'email' => $brand['email'] ?? ''],
+            ['kind' => ContactPoints::PHONE, 'phone_prefix' => $brand['phone_prefix'] ?? '', 'phone' => $brand['phone'] ?? ''],
+        ]) ?? [];
+    }
+
+    /** @return array<int|string, mixed> */
+    private static function decodeList(mixed $json): array
+    {
+        $decoded = is_string($json) && $json !== '' ? json_decode($json, true) : $json;
+
+        return is_array($decoded) ? $decoded : [];
     }
 
     private static function email(mixed $value): ?string
