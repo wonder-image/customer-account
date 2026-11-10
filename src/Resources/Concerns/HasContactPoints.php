@@ -64,7 +64,7 @@ trait HasContactPoints
         }
 
         $company = static::contactPointOwner() === ContactPoints::COMPANY;
-        $labels = ['' => '—'] + ContactPoints::labels() + [ContactPoints::ACCESS_LABEL => (string) __t('contacts.point_label_access')];
+        $labels = ['' => (string) __t('contacts.option_none_f')] + ContactPoints::labels() + [ContactPoints::ACCESS_LABEL => (string) __t('contacts.point_label_access')];
 
         return [
             FormField::key(static::$pointsInput)
@@ -122,7 +122,7 @@ trait HasContactPoints
                 ->repeater([
                     RepeaterColumn::key('kind')->select($kinds)->value(ContactPoints::EMAIL)
                         ->label((string) __t('contacts.point_kind'))->columnSpan(2),
-                    RepeaterColumn::key('label')->select(['' => '—'] + ContactPoints::labels())->value('')
+                    RepeaterColumn::key('label')->select(['' => (string) __t('contacts.option_none_f')] + ContactPoints::labels())->value('')
                         ->label((string) __t('contacts.point_label'))->columnSpan(3),
                     RepeaterColumn::key('phone_prefix')->text()
                         ->label((string) __t('contacts.point_prefix'))->columnSpan(2),

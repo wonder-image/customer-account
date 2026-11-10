@@ -26,7 +26,7 @@ trait HasCompanyGroup
     {
         return [
             FormField::key(static::$groupInput)
-                ->selectSearch(['' => '—'] + CompanyGroups::options())
+                ->selectSearch(['' => (string) __t('contacts.option_none')] + CompanyGroups::options())
                 ->label((string) __t('contacts.company_parent')),
         ];
     }

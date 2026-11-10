@@ -80,7 +80,7 @@ check('clean: kit spento ignora i suoi campi, dominio ricavato dal sito (mai da 
     return $off === ['website' => 'https://www.lapiana.it', 'description' => 'Ristorante', 'domain' => 'lapiana.it'] && $offErrors === []
         && $onErrors === ['website' => 'invalid', 'sector' => 'invalid', 'assets_url' => 'invalid']
         && $on['email'] === 'ordini@lapiana.it' && $on['phone_prefix'] === '+39' && $on['phone'] === '02123456'
-        && $on['colors'] === '["#ffffff"]' && $on['socials'] === '{"facebook":"https://facebook.com/lapiana"}'
+        && $on['colors'] === '[{"color":"#ffffff","name":""}]' && $on['socials'] === '{"facebook":"https://facebook.com/lapiana"}'
         && !isset($gmail['domain']) && $kept['domain'] === 'piana.com';
 });
 
@@ -130,8 +130,22 @@ check('form del brand: due gruppi, il kit solo se acceso; URL non validi rifiuta
         && $offCards === 1 && $onCards === 2
         && $values['website'] === 'https://lapiana.it' && $values['domain'] === 'lapiana.it' && !isset($values['email']) && !isset($values['colors'])
         && $bad === 'contacts.brand_invalid' && $badColor === 'contacts.brand_invalid'
-        && $kit['email'] === 'x@lapiana.it' && $kit['colors'] === '["#ffffff","#000000"]' && $kit['socials'] === '{"instagram":"https://instagram.com/lapiana"}'
-        && $form['colors'] === [['color' => '#ffffff'], ['color' => '#000000']] && $form['socials'] === [['network' => 'instagram', 'url' => 'https://instagram.com/lapiana']];
+        && $kit['email'] === 'x@lapiana.it' && $kit['colors'] === '[{"color":"#ffffff","name":""},{"color":"#000000","name":""}]' && $kit['socials'] === '{"instagram":"https://instagram.com/lapiana"}'
+        && $form['colors'] === [['color' => '#ffffff', 'name' => ''], ['color' => '#000000', 'name' => '']] && $form['socials'] === [['network' => 'instagram', 'url' => 'https://instagram.com/lapiana']];
+});
+
+check('palette: nomi dei colori puliti e tenuti, doppioni col primo nome, vecchie liste di stringhe rilette', function () {
+    $palette = BrandData::palette([
+        ['color' => '#C00', 'name' => ' Rosso Piana '],
+        ['color' => '#cc0000', 'name' => 'Doppione'],
+        ['color' => '#000000'],
+    ]);
+    $legacy = BrandData::palette(['#ffffff', '#000']);
+
+    return $palette === [['color' => '#cc0000', 'name' => 'Rosso Piana'], ['color' => '#000000', 'name' => '']]
+        && $legacy === [['color' => '#ffffff', 'name' => ''], ['color' => '#000000', 'name' => '']]
+        && BrandData::palette([['color' => 'red', 'name' => 'x']]) === null
+        && BrandData::colors([['color' => '#fff', 'name' => 'Bianco']]) === ['#ffffff'];
 });
 
 check('domini, recapiti, settore e lingua: liste pulite, primo valore nelle colonne singole, vecchi record riletti', function () use ($brand) {
@@ -147,7 +161,7 @@ check('domini, recapiti, settore e lingua: liste pulite, primo valore nelle colo
     $legacy = $brand(1, 'La Piana', ['domain' => 'lapiana.it', 'email' => 'x@lapiana.it', 'phone_prefix' => '+39', 'phone' => '02123456']);
 
     return $domains === ['lapiana.it', 'piana.com'] && $errors === []
-        && $contacts === [['kind' => 'email', 'email' => 'ordini@lapiana.it', 'label' => 'Ordini'], ['kind' => 'phone', 'phone_prefix' => '+39', 'phone' => '02123456', 'label' => '']]
+        && $contacts === [['kind' => 'email', 'email' => 'ordini@lapiana.it', 'label' => ''], ['kind' => 'phone', 'phone_prefix' => '+39', 'phone' => '02123456', 'label' => '']]
         && $badContact === null
         && $clean['domain'] === 'lapiana.it' && json_decode($clean['domains'], true) === ['lapiana.it', 'piana.com']
         && $clean['email'] === 'x@lapiana.it' && $clean['phone'] === '02123456' && $clean['phone_prefix'] === '+39'

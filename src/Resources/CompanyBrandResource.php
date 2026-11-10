@@ -6,7 +6,7 @@ use InvalidArgumentException;
 use Wonder\App\Resource;
 use Wonder\App\ResourceSchema\{ApiSchema, FormField, NavigationSchema, PageSchema, PermissionSchema, RepeaterColumn, TableColumn};
 use Wonder\Backend\Support\QuickCreateStore;
-use Wonder\Elements\Components\{Card, SectionTitle};
+use Wonder\Elements\Components\{Card, Container, SectionTitle};
 use Wonder\Elements\Form\Form;
 use Wonder\Plugin\CustomerAccount\Models\CompanyBrand;
 use Wonder\Plugin\CustomerAccount\Support\BrandData;
@@ -21,9 +21,11 @@ use Wonder\Plugin\CustomerAccount\Support\ContactRelations;
  * Codice e slug nascono alla creazione e non cambiano; un brand si archivia
  * dal suo form (campo «Archiviato») e il form avvisa dei nomi simili.
  *
- * Il form ha due gruppi: i dati per tutti (logo, sito, domini email,
- * descrizione) e il «brand kit» (recapiti, social, colori, tono, settore,
- * lingua, materiali), che compare e si salva solo se `CompanyBrands::kitEnabled()`.
+ * Il form ha due gruppi: i dati per tutti (in testa il logo accanto a nome,
+ * gruppo, sito e archiviato, poi domini email e descrizione) e il «brand kit»
+ * (recapiti con etichette preimpostate, social, colori con il loro nome, tono,
+ * settore, lingua, materiali), che compare e si salva solo se
+ * `CompanyBrands::kitEnabled()`.
  * Liste e scelte passano da `BrandData`: settori ATECO / NACE, lingue ISO.
  *
  * Un modulo che usa altri ruoli la estende e cambia `permissionSchema()`.
@@ -61,7 +63,7 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
         $labels = static::labelSchema();
         $fields = [
             FormField::key('name')->text()->label($labels['name'])->required(),
-            FormField::key('parent_id')->selectSearch(['' => '—'] + CompanyBrands::parentOptions())->label($labels['parent_id']),
+            FormField::key('parent_id')->selectSearch(['' => (string) __t('contacts.option_none')] + CompanyBrands::parentOptions())->label($labels['parent_id']),
             FormField::key('logo')->fileDragDrop('image')->label($labels['logo']),
             FormField::key('website')->url()->label($labels['website']),
             FormField::key('domains')
@@ -97,7 +99,7 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
                         ->visibleWhen('kind', ContactPoints::PHONE),
                     RepeaterColumn::key('phone')->tel()->label((string) __t('contacts.point_kind_phone'))->columnFill()
                         ->visibleWhen('kind', ContactPoints::PHONE),
-                    RepeaterColumn::key('label')->text()->label((string) __t('contacts.point_label'))->columnSpan(12),
+                    RepeaterColumn::key('label')->select(['' => (string) __t('contacts.option_none_f')] + ContactPoints::labels())->value('')->label((string) __t('contacts.point_label'))->columnSpan(12),
                 ])
                 ->nested()
                 ->repeaterAdvanced('label')
@@ -114,31 +116,52 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
                 ->label($labels['socials']),
             FormField::key('colors')
                 ->repeater([
-                    RepeaterColumn::key('color')->color()->label((string) __t('contacts.brand_color'))->columnFill(),
+                    RepeaterColumn::key('color')->color()->label((string) __t('contacts.brand_color'))->columnSpan(4),
+                    RepeaterColumn::key('name')->text()->placeholder((string) __t('contacts.brand_color_name_placeholder'))->label((string) __t('contacts.brand_color_name'))->columnFill(),
                 ])
                 ->nested()
                 ->repeaterSortable()
                 ->repeaterAddLabel((string) __t('contacts.brand_color_add'))
                 ->label($labels['colors']),
             FormField::key('tone')->textarea()->label($labels['tone']),
-            FormField::key('sector')->selectSearch(['' => '—'] + BrandData::sectors())->label($labels['sector']),
+            FormField::key('sector')->selectSearch(['' => (string) __t('contacts.option_none')] + BrandData::sectors())->label($labels['sector']),
             FormField::key('language')->selectSearch(BrandData::languages())->value(BrandData::DEFAULT_LANGUAGE)->label($labels['language']),
             FormField::key('assets_url')->url()->label($labels['assets_url']),
         ];
     }
 
-    /** Due gruppi: i dati del brand e, se acceso, il brand kit. */
+    /**
+     * Due gruppi: i dati del brand e, se acceso, il brand kit. La testata è
+     * come quella del marchio del catalogo: il logo a sinistra, nome, brand
+     * principale, sito e archiviazione accanto; sotto il resto.
+     */
     public static function formLayoutSchema(): ?Form
     {
-        $widths = ['website' => 12, 'sector' => 8, 'language' => 4];
+        $head = ['name', 'parent_id', 'website', 'archived'];
+        $widths = ['sector' => 8, 'language' => 4];
         $kit = array_flip(BrandData::KIT_FIELDS);
+        $fields = [];
         $groups = [[], []];
 
         foreach (static::formSchema() as $field) {
-            $groups[isset($kit[$field->name]) ? 1 : 0][] = $field->columnSpan($widths[$field->name] ?? 12);
+            $fields[$field->name] = $field;
         }
 
-        $cards = [(new Card)->columns(12)->columnSpan(12)->components([SectionTitle::make((string) __t('contacts.brand_group_base'))->columnSpan(12), ...$groups[0]])];
+        foreach ($fields as $name => $field) {
+            if ($name !== 'logo' && !in_array($name, $head, true)) {
+                $groups[isset($kit[$name]) ? 1 : 0][] = $field->columnSpan($widths[$name] ?? 12);
+            }
+        }
+
+        $cards = [(new Card)->columns(12)->columnSpan(12)->components([
+            SectionTitle::make((string) __t('contacts.brand_group_base'))->columnSpan(12),
+            $fields['logo']->columnSpan(4),
+            (new Container)->components(array_map(
+                static fn (string $name) => $fields[$name]->columnSpan(12),
+                array_values(array_filter($head, static fn (string $name): bool => isset($fields[$name])))
+            ))->columns(12)->columnSpan(8),
+            ...$groups[0],
+        ])];
 
         if ($groups[1] !== []) {
             $cards[] = (new Card)->columns(12)->columnSpan(12)->components([
@@ -172,8 +195,9 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
             $values['socials'] = $rows;
         }
 
+        // Righe colore + nome; vale anche la lista di soli esadecimali di prima.
         if (isset($values['colors']) && is_array($values['colors'])) {
-            $values['colors'] = array_map(static fn (string $color): array => ['color' => $color], array_values(array_filter($values['colors'], 'is_string')));
+            $values['colors'] = BrandData::palette($values['colors']) ?? [];
         }
 
         // Una lingua di prima con il paese (`en-GB`) si mostra con la sua lingua (`en`).

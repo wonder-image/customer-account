@@ -24,7 +24,8 @@
     "overview": {
         "address_first": "First address",
         "addresses_count": "{{count}} saved",
-        "addresses_none": "No saved addresses"
+        "addresses_none": "No saved addresses",
+        "not_set": "Not provided"
     },
     "personal": {
         "birth_date": "Date of birth",

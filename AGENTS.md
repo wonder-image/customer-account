@@ -67,7 +67,7 @@ Le convenzioni del framework sono in `vendor/wonder-image/app/AGENTS.md`.
   supplenze di core e lib (vedi README, «Cosa manca nel framework»): le
   regole restano sul server.
 - Dati del brand e brand kit: regole in `BrandData` (URL solo http/https,
-  colori esadecimali, social da lista), kit visibile solo con
+  colori `{color, name}` letti con `palette()`, etichette dei recapiti solo da `ContactPoints::labels()`, social da lista), kit visibile solo con
   `CompanyBrands::useKit()`; il logo passa solo come file caricato.
   `CompanyBrands::byDomain()` non riconosce mai una casella generica né un
   social, ed è solo un suggerimento: mai per agganciare account o dati.
@@ -116,3 +116,6 @@ Le convenzioni del framework sono in `vendor/wonder-image/app/AGENTS.md`.
   `parent::` e personalizzano con `linksContactOn()` / `afterContactLinked()`.
 - Test: `WI_APP=<app> php tests/run.php`. Chi passa dai Model richiede prima
   `tests/support/FakeDb.php` (database in memoria). Vedi `README.md`.
+- Testo visibile: mai «—», «--» o «–» come opzione vuota, valore mancante o
+  separatore. Opzione vuota «Nessuno» / «Nessuna» (`contacts.option_none*`),
+  valore mancante vuoto o «Non indicato».
