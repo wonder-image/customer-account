@@ -297,6 +297,45 @@ check('aziende: le aree dei contatti tolti se ne vanno, anche con «Altri contat
         && $person['rows'][0]['departments'] === null;
 });
 
+check('andata e ritorno: salvare il riquadro com\'è non cambia né la scheda né i contatti in più', function () use ($seed, $token, $card) {
+    $tables = $seed();
+    // Senza email principale, con una sola email etichettata; prefisso salvato senza telefono.
+    $tables['companies'][2] = ['email' => '', 'phone_prefix' => '+39', 'phone' => ''] + $tables['companies'][2];
+    $tables['company_points'][1] = ['id' => 1, 'company_id' => 2, 'kind' => 'email', 'value' => 'fatture@rossi.test', 'phone_prefix' => '', 'label' => 'billing', 'position' => 0, 'deleted' => 'false'];
+    Query::reset($tables);
+    $before = [$card('companies', 2), ContactPoints::of(ContactPoints::COMPANY, 2)];
+    $rows = ContactPoints::formRows(ContactPoints::all(ContactPoints::COMPANY, 2), true);
+    $saved = CompanyResource::mutateRequestValues(
+        ['business_name' => 'Rossi srl', 'active' => 'true', '_csrf' => $token, 'contact_box_form' => '1', 'contact_points' => $rows],
+        'update', 'backend', Query::$tables['companies'][2]
+    );
+    ContactPoints::syncAll(ContactPoints::COMPANY, 2, $rows);
+    $same = [$card('companies', 2), ContactPoints::of(ContactPoints::COMPANY, 2)] === $before;
+
+    // Una riga nuova non segnata diventa principale e lo resta alla scrittura, anche dopo quella già salvata.
+    $more = [...$rows, ['kind' => 'email', 'email' => 'info@rossi.test', 'is_primary' => 'false']];
+    $split = ContactPoints::split(ContactPoints::COMPANY, $more, Query::$tables['companies'][2], false, ContactPoints::of(ContactPoints::COMPANY, 2));
+    Query::$tables['companies'][2]['email'] = $split['columns']['email'];
+    ContactPoints::syncAll(ContactPoints::COMPANY, 2, $more);
+    $promoted = $card('companies', 2)['email'];
+    $points = array_column(ContactPoints::of(ContactPoints::COMPANY, 2), 'label', 'value');
+
+    // Tolto il principale, il primo contatto rimasto prende il suo posto.
+    ContactPoints::syncAll(ContactPoints::COMPANY, 2, [['kind' => 'email', 'email' => 'fatture@rossi.test', 'label' => 'billing']]);
+    $replaced = $card('companies', 2)['email'];
+
+    // Una persona: principali e un contatto in più tornano identici.
+    $tables = $seed();
+    $tables['contact_points'][1] = ['id' => 1, 'contact_id' => 2, 'kind' => 'phone', 'value' => '021234567', 'phone_prefix' => '+39', 'label' => 'work', 'position' => 0, 'deleted' => 'false'];
+    Query::reset($tables);
+    $person = [$card('contacts', 2), ContactPoints::of(ContactPoints::CONTACT, 2)];
+    ContactPoints::syncAll(ContactPoints::CONTACT, 2, ContactPoints::formRows(ContactPoints::all(ContactPoints::CONTACT, 2)));
+
+    return $same && ($saved['email'] ?? '') === '' && !array_key_exists('phone_prefix', $saved)
+        && $split['columns']['email'] === 'info@rossi.test' && $promoted === 'info@rossi.test' && $points === ['fatture@rossi.test' => 'billing'] && $replaced === 'fatture@rossi.test'
+        && [$card('contacts', 2), ContactPoints::of(ContactPoints::CONTACT, 2)] === $person;
+});
+
 check('Resource: riquadro con «Si occupa di» solo sulle aziende, script del modulo nel layout', function () {
     $columns = static function (string $resource): array {
         foreach ($resource::formSchema() as $field) {

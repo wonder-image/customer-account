@@ -33,6 +33,12 @@ class Contact extends Model
         return AddressExtension::billing(countryDefault: 'IT')->withLink(false)->asPrivate()->withGeo()->withNameSearch();
     }
 
+    /** Una persona può non avere un paese (schede nate da un account o da un import). */
+    protected static function countryOptional(): bool
+    {
+        return true;
+    }
+
     /** Operational identities must not travel through configuration sync. */
     public static function syncSchema(): ?SyncSchema
     {

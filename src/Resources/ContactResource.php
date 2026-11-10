@@ -47,7 +47,7 @@ class ContactResource extends Resource
     public static function formSchema(): array
     {
         // Telefono ed email stanno nel riquadro «Contatti», non nei campi della fatturazione.
-        $fields = array_diff_key(static::$model::billing()->formSchema(), ['phone_prefix' => true, 'phone' => true]);
+        $fields = array_diff_key(static::$model::billingFormSchema(), ['phone_prefix' => true, 'phone' => true]);
         foreach (static::requiredKeys() as $key) { $fields[$key]->required(); }
         // Un'attività cercata per nome dà la ragione sociale, se è vuota (lo script del modulo).
         if (isset($fields['business_name'], $fields['street'])) { $fields['street']->attribute('data-ca-place-name="business_name"'); }

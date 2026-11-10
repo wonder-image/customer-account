@@ -33,6 +33,31 @@ trait HasPartyColumns
         ];
     }
 
+    /**
+     * I campi di fatturazione per il form. Dove il Paese può mancare
+     * (`countryOptional()`, le persone) il select ha anche l'opzione vuota:
+     * senza, una scheda senza paese mostrerebbe il primo dell'elenco.
+     *
+     * @return array<string, \Wonder\App\ResourceSchema\Input>
+     */
+    public static function billingFormSchema(): array
+    {
+        $fields = static::billing()->formSchema();
+
+        if (static::countryOptional() && isset($fields['country']) && function_exists('countries')) {
+            $options = (array) ($fields['country']->get('options') ?? []);
+            $fields['country']->options(['' => (string) __t('contacts.option_none')] + ($options !== [] ? $options : countries()));
+        }
+
+        return $fields;
+    }
+
+    /** Il Paese della fatturazione può restare vuoto? */
+    protected static function countryOptional(): bool
+    {
+        return false;
+    }
+
     /** L'indirizzo di fatturazione già composto, come lo mostra il core. */
     public static function decorate(array $row): array
     {

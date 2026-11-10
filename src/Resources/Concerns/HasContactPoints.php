@@ -192,7 +192,9 @@ trait HasContactPoints
 
         $posted = $values[static::$pointsInput] ?? [];
         // Qui sì il controllo del dominio (DNS): è il form, che può dire cosa non va.
-        $split = ContactPoints::split(static::contactPointOwner(), is_array($posted) ? array_values($posted) : [], $oldValues ?? [], true);
+        $owner = static::contactPointOwner();
+        $id = (int) ($oldValues['id'] ?? 0);
+        $split = ContactPoints::split($owner, is_array($posted) ? array_values($posted) : [], $oldValues ?? [], true, $id > 0 ? ContactPoints::of($owner, $id) : []);
 
         if ($split['problems'] !== []) {
             throw new InvalidArgumentException(implode("\n", $split['problems']));

@@ -69,6 +69,24 @@ check('form: la via cerca anche le attività per nome; il nome va nella ragione 
         && in_array('place_id', array_map(static fn ($field) => $field->name, ContactResource::formSchema()), true);
 });
 
+check('form: il Paese di una persona ha l\'opzione vuota e parte da IT; quello di un\'azienda no', function () {
+    $country = static function (string $resource) {
+        foreach ($resource::formSchema() as $field) {
+            if ($field->name === 'country') {
+                return $field;
+            }
+        }
+
+        return null;
+    };
+    $person = $country(ContactResource::class);
+    $company = $country(CompanyResource::class);
+    $options = (array) $person->get('options');
+
+    return array_key_first($options) === '' && isset($options['IT']) && $person->get('value') === 'IT'
+        && !array_key_exists('', (array) ($company->get('options') ?? []));
+});
+
 check('scheda: geo dal form ripulito (fuori limiti e caratteri strani = null), senza geo nel POST non si azzera', function () use ($tables, $token) {
     Query::reset($tables());
     $base = ['name' => 'Anna', 'surname' => 'Bianchi', 'active' => 'true', '_csrf' => $token];

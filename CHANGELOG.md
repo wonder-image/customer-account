@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Fixed
+
+- Riquadro «Contatti»: salvare una scheda senza modifiche non cambia più i recapiti. Un contatto in più già salvato non sale a principale (e non perde l'etichetta) quando la scheda non ne aveva uno; il prefisso salvato senza telefono resta. `ContactPoints::split()` riceve i contatti salvati (`$saved`).
+- Form della persona: il «Paese» ha l'opzione vuota, così una scheda senza paese non mostra il primo dell'elenco (`Contact::billingFormSchema()`, `HasPartyColumns::countryOptional()`). In creazione resta il paese predefinito.
+
 ### Changed
 
 - Brand: i colori hanno un nome. `colors` si salva come lista di `{color, name}`; `BrandData::palette()` li rilegge e accetta anche la lista di soli esadecimali di prima (nome vuoto).
