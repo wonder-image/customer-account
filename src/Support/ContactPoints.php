@@ -121,8 +121,11 @@ final class ContactPoints
 
     /**
      * Le righe postate ripulite, con i problemi da mostrare. Una riga senza
-     * valore si salta (la riga vuota del repeater). L'email passa dal
-     * validatore del framework; il telefono tiene solo le cifre e il prefisso
+     * valore si salta (la riga vuota del repeater). L'email deve avere un
+     * formato valido (`emailFormat()`, senza rete); con `$checkDomain` passa
+     * anche dal validatore del framework, che interroga il DNS: lo fa solo il
+     * form (`HasContactPoints::assertContactPoints()`), mai la scrittura, così
+     * un DNS che non risponde non cancella recapiti salvati. Il telefono tiene solo le cifre e il prefisso
      * (`+` e fino a quattro cifre). Niente doppioni sulla scheda, contando
      * anche l'email e il telefono principali (`$primary`: `email`,
      * `phone_prefix`, `phone`).
@@ -131,7 +134,7 @@ final class ContactPoints
      * @param array<string, mixed> $primary
      * @return array{0: list<array{kind: string, value: string, phone_prefix: string, label: string}>, 1: list<string>}
      */
-    public static function clean(array $rows, array $primary = []): array
+    public static function clean(array $rows, array $primary = [], bool $checkDomain = false): array
     {
         $seen = [];
         $mainEmail = self::email($primary['email'] ?? '');
@@ -166,7 +169,7 @@ final class ContactPoints
                 $value = self::email($raw);
                 $prefix = '';
 
-                if (!self::validEmail($value)) {
+                if (!($checkDomain ? self::validEmail($value) : self::emailFormat($value))) {
                     $problems[] = (string) __t('contacts.point_email_invalid', ['value' => $shown]);
                     continue;
                 }
@@ -253,10 +256,22 @@ final class ContactPoints
         return is_scalar($value) ? strtolower(trim((string) $value)) : '';
     }
 
-    /** Un'email valida per il validatore del framework (formato e dominio). */
+    /**
+     * Il formato di un'email, senza rete: `FILTER_VALIDATE_EMAIL`, al massimo
+     * 190 caratteri e niente spazi, virgolette, apici, backtick né `< >` (il
+     * filtro accetta `"<img src=x onerror=…>"@dominio.it`).
+     */
+    public static function emailFormat(string $value): bool
+    {
+        return $value !== '' && strlen($value) <= 190
+            && preg_match('/[\s"\'`<>\\\\]/', $value) !== 1
+            && filter_var($value, FILTER_VALIDATE_EMAIL) !== false;
+    }
+
+    /** Un'email valida per il validatore del framework: formato e dominio (interroga il DNS). */
     public static function validEmail(string $value): bool
     {
-        if (strlen($value) > 190) {
+        if (!self::emailFormat($value)) {
             return false;
         }
 

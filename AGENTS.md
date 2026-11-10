@@ -46,7 +46,12 @@ Le convenzioni del framework sono in `vendor/wonder-image/app/AGENTS.md`.
 - Dati del brand e brand kit: regole in `BrandData` (URL solo http/https,
   colori esadecimali, social da lista), kit visibile solo con
   `CompanyBrands::useKit()`; il logo passa solo come file caricato.
-  `CompanyBrands::byDomain()` non riconosce mai una casella generica.
+  `CompanyBrands::byDomain()` non riconosce mai una casella generica né un
+  social, ed è solo un suggerimento: mai per agganciare account o dati.
+- Visibilità per riga: `ContactRelations::useCounterpartFilter()` /
+  `useAccessGuard()` (di serie spenti); un legame solo con `attach()`.
+- Le email si salvano con il solo controllo di formato (niente DNS in
+  scrittura); il DNS solo nella validazione del form.
 - Brand: `code` (`cbr_`) e `slug` univoci e immutabili, `name_key` per i
   doppioni; un legame staccato si chiude (`ended_at`), non si cancella; un
   brand doppione si unisce (`merge()`, evento `company.brand_merged`) e si

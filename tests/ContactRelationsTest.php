@@ -501,7 +501,7 @@ check('sync: un errore annulla legami e aree e non emette eventi', function () u
     return $thrown && $seen === [] && Query::$tables === $before;
 });
 
-check('migrazione delle aree: copia il vecchio reparto, salta chi ha già aree; rilanciata non fa niente', function () {
+check('migrazione delle aree: copia il vecchio reparto (normalizzato), salta chi ha già aree; rilanciata non fa niente', function () {
     Query::reset([
         'contact_relations' => [
             1 => ['id' => 1, 'company_id' => 1, 'person_id' => 2, 'department' => 'administration', 'deleted' => 'false'],
@@ -518,8 +518,49 @@ check('migrazione delle aree: copia il vecchio reparto, salta chi ha già aree; 
     $after = Query::$tables['contact_relation_departments'];
     $second = RelationDepartmentsMigration::backfill();
 
-    return $first === 2 && $second === 0 && Query::$tables['contact_relation_departments'] === $after
-        && array_column($after, 'department', 'relation_id') === [4 => 'technical', 1 => 'administration', 3 => 'sales'];
+    return $first === 3 && $second === 0 && Query::$tables['contact_relation_departments'] === $after
+        && array_column($after, 'department', 'relation_id') === [4 => 'technical', 1 => 'administration', 3 => 'sales', 5 => 'x_y'];
+});
+
+check('migrazione delle aree: reparti fuori formato normalizzati o `other`, mai saltati', function () {
+    Query::reset([
+        'contact_relations' => [
+            1 => ['id' => 1, 'company_id' => 1, 'person_id' => 2, 'department' => ' Customer Care ', 'deleted' => 'false'],
+            2 => ['id' => 2, 'company_id' => 1, 'person_id' => 3, 'department' => 'post-vendita', 'deleted' => 'false'],
+            3 => ['id' => 3, 'company_id' => 1, 'person_id' => 4, 'department' => 'Uffício €', 'deleted' => 'false'],
+            4 => ['id' => 4, 'company_id' => 1, 'person_id' => 5, 'department' => null, 'deleted' => 'false'],
+        ],
+        'contact_relation_departments' => [],
+    ]);
+    $copied = RelationDepartmentsMigration::backfill();
+
+    return $copied === 3 && array_column(Query::$tables['contact_relation_departments'], 'department', 'relation_id')
+        === [1 => 'customer_care', 2 => 'post_vendita', 3 => 'other'];
+});
+
+check('migrazione delle aree: una lettura o una scrittura fallita ferma l\'aggiornamento', function () {
+    $seed = [
+        'contact_relations' => [1 => ['id' => 1, 'company_id' => 1, 'person_id' => 2, 'department' => 'sales', 'deleted' => 'false']],
+        'contact_relation_departments' => [],
+    ];
+    $thrown = static function (): bool {
+        try {
+            RelationDepartmentsMigration::backfill();
+        } catch (RuntimeException) {
+            return true;
+        }
+
+        return false;
+    };
+    Query::reset($seed);
+    Query::$failReads = true;
+    $read = $thrown();
+    Query::reset($seed);
+    Query::$failWrites = true;
+    $write = $thrown();
+    Query::reset();
+
+    return $read && $write;
 });
 
 check('niente più `department` nello schema del legame: lo toglie runTables() dopo la migrazione', function () {
@@ -529,6 +570,110 @@ check('niente più `department` nello schema del legame: lo toglie runTables() d
 
     return !array_key_exists('department', $schema) && !array_key_exists('ind_department', $schema)
         && end($migrations) === RelationDepartmentsMigration::class;
+});
+
+check('principale dal lato persona: ogni azienda tiene il suo, gli altri referenti di quell\'azienda lo perdono', function () use ($tables) {
+    Query::reset($tables() + ['contact_relations' => [
+        1 => ['id' => 1, 'company_id' => 1, 'person_id' => 3, 'is_primary' => 'true', 'position' => 1, 'deleted' => 'false'],
+        2 => ['id' => 2, 'company_id' => 4, 'person_id' => 3, 'is_primary' => 'true', 'position' => 1, 'deleted' => 'false'],
+    ], 'contact_relation_departments' => []]);
+    $person = ContactRelations::normalize([['company_id' => 1, 'is_primary' => 'true'], ['company_id' => 4, 'is_primary' => 'true']], [], 'person_id', 2, [1, 4]);
+    $company = ContactRelations::normalize([['person_id' => 2, 'is_primary' => 'true'], ['person_id' => 3, 'is_primary' => 'true']], [], 'company_id', 1, [2, 3]);
+    ContactRelations::sync(ContactRelations::PERSON, 2, [['company_id' => '1', 'is_primary' => 'true'], ['company_id' => '4', 'is_primary' => 'true']]);
+    $primaries = static fn (int $company): array => array_map('intval', array_column(array_filter(
+        ContactRelations::peopleOf($company),
+        static fn (array $row): bool => $row['is_primary'] === 'true'
+    ), 'person_id'));
+
+    return array_column($person, 'is_primary') === ['true', 'true'] && array_column($company, 'is_primary') === ['true', 'false']
+        && $primaries(1) === [2] && $primaries(4) === [2];
+});
+
+check('attach: crea o riapre un solo legame, accesso none, aree e brand; gli altri legami restano', function () use ($tables) {
+    Query::reset($tables() + ['contact_relations' => [
+        1 => ['id' => 1, 'company_id' => 1, 'person_id' => 3, 'job_title' => 'Capo', 'is_primary' => 'true', 'access' => 'admin', 'position' => 4, 'deleted' => 'false'],
+        2 => ['id' => 2, 'company_id' => 4, 'person_id' => 2, 'job_title' => 'Vecchio', 'access' => 'admin', 'position' => 1, 'deleted' => 'true'],
+    ], 'contact_relation_departments' => [], 'contact_relation_brands' => []]);
+    ContactEvents::reset();
+    $seen = [];
+    ContactEvents::listen(ContactEvents::LINKED, function (string $e, array $p) use (&$seen) { $seen[] = $p['company_id'].'-'.$p['person_id']; });
+    ContactEvents::listen(ContactEvents::UNLINKED, function (string $e, array $p) use (&$seen) { $seen[] = 'unlinked'; });
+    $before = Query::$tables['contact_relations'][1];
+    $new = ContactRelations::attach(1, 2, ['job_title' => 'Acquisti', 'departments' => ['sales', 'boss']]);
+    $reopened = ContactRelations::attach(4, 2);
+    $again = ContactRelations::attach(1, 2, ['job_title' => 'Cambiato']);
+    $missing = ContactRelations::attach(99, 2) || ContactRelations::attach(1, 99);
+    ContactEvents::reset();
+    $created = array_values(array_filter(Query::$tables['contact_relations'], static fn ($r) => (int) $r['company_id'] === 1 && (int) $r['person_id'] === 2))[0];
+    $old = Query::$tables['contact_relations'][2];
+
+    return $new && $reopened && $again && !$missing
+        && Query::$tables['contact_relations'][1] === $before
+        && $created['job_title'] === 'Acquisti' && $created['access'] === 'none' && (int) $created['position'] === 5
+        && ContactRelations::departmentsOf((int) $created['id']) === ['sales']
+        && $old['deleted'] === 'false' && $old['access'] === 'none' && $old['job_title'] === ''
+        && $seen === ['1-2', '4-2'] && count(Query::$tables['contact_relations']) === 3;
+});
+
+check('filtro delle controparti: si legano solo le ammesse, le già legate restano; il select le mostra', function () use ($tables) {
+    Query::reset($tables() + ['contact_relations' => [
+        1 => ['id' => 1, 'company_id' => 1, 'person_id' => 3, 'position' => 1, 'deleted' => 'false'],
+    ], 'contact_relation_departments' => []]);
+    $calls = [];
+    ContactRelations::useCounterpartFilter(function (string $model, array $ids) use (&$calls): array {
+        $calls[] = $model;
+
+        return array_values(array_intersect($ids, [2]));
+    });
+    $valid = ContactRelations::existingCounterparts(ContactRelations::COMPANY, [2, 3, '99', ['x']], 1);
+    $fresh = ContactRelations::existingCounterparts(ContactRelations::COMPANY, [3], 0);
+    // Il form di Rossi srl: Luca (3) è già legato e resta tra le scelte, anche se il filtro non lo ammette.
+    CompanyResource::hydrateRepeaterFormValues([], 1, [], []);
+    $options = (array) array_values(array_filter((array) CompanyResource::formFieldsByKey()[CompanyResource::RELATION_PEOPLE]->get('context')['columns'], static fn ($c) => $c->name === 'person_id'))[0]->get('options');
+    CompanyResource::hydrateRepeaterFormValues([], 0, [], []);
+    $newForm = (array) array_values(array_filter((array) CompanyResource::formFieldsByKey()[CompanyResource::RELATION_PEOPLE]->get('context')['columns'], static fn ($c) => $c->name === 'person_id'))[0]->get('options');
+    ContactRelations::sync(ContactRelations::PERSON, 3, [['company_id' => '1'], ['company_id' => '4']]);
+    ContactRelations::useCounterpartFilter(null);
+    $all = ContactRelations::existingCounterparts(ContactRelations::COMPANY, [2, 3]);
+
+    return $valid === [2, 3] && $fresh === [] && in_array(\Wonder\Plugin\CustomerAccount\Models\Contact::class, $calls, true)
+        && array_keys(array_diff_key($options, ['' => true])) === [2, 3] && array_keys(array_diff_key($newForm, ['' => true])) === [2]
+        && array_map('intval', array_column(ContactRelations::companiesOf(3), 'company_id')) === [1]
+        && $all === [2, 3];
+});
+
+check('guardia dell\'accesso: senza permesso non sale oltre quello salvato, scendere si può; senza guardia invariato', function () use ($tables) {
+    $existing = [
+        ['id' => 1, 'person_id' => 2, 'access' => 'buyer', 'deleted' => 'false'],
+        ['id' => 2, 'person_id' => 3, 'access' => 'admin', 'deleted' => 'true'],
+    ];
+    $asked = [];
+    ContactRelations::useAccessGuard(function (int $company, int $person, string $access) use (&$asked): bool {
+        $asked[] = "{$company}-{$person}-{$access}";
+
+        return $access === 'buyer';
+    });
+    $rows = ContactRelations::normalize([
+        ['person_id' => 2, 'access' => 'admin'],
+        ['person_id' => 3],
+        ['person_id' => 4, 'access' => 'buyer'],
+    ], $existing, 'company_id', 1, [2, 3, 4]);
+    $down = ContactRelations::normalize([['person_id' => 2, 'access' => 'none']], $existing, 'company_id', 1, [2]);
+    ContactRelations::useAccessGuard(null);
+    $free = ContactRelations::normalize([['person_id' => 2, 'access' => 'admin'], ['person_id' => 3]], $existing, 'company_id', 1, [2, 3]);
+
+    return array_column($rows, 'access') === ['buyer', 'none', 'buyer'] && $asked === ['1-2-admin', '1-3-admin', '1-4-buyer']
+        && $down[0]['access'] === 'none' && array_column($free, 'access') === ['admin', 'admin'];
+});
+
+check('valori non scalari dalla richiesta: valgono vuoto, senza errori', function () use ($tables) {
+    Query::reset($tables() + ['contact_relations' => [], 'contact_relation_departments' => []]);
+    $rows = ContactRelations::normalize([['person_id' => ['2'], 'job_title' => ['x']], ['person_id' => '3', 'job_title' => ['x'], 'access' => ['admin']]], [], 'company_id', 1, [2, 3]);
+    ContactRelations::sync(ContactRelations::COMPANY, 1, [['person_id' => '2', 'departments' => [['sales']], 'brand_ids' => [['1']]], 'non una riga', ['person_id' => '', 'new_name' => ['x']]]);
+
+    return count($rows) === 1 && $rows[0]['job_title'] === '' && $rows[0]['access'] === 'none'
+        && array_map('intval', array_column(ContactRelations::peopleOf(1), 'person_id')) === [2] && ContactRelations::departmentsOf(1) === []
+        && count(Query::$tables['contacts']) === 2;
 });
 
 summary();

@@ -174,4 +174,38 @@ check('CompanyRecord: i brand portano i loro dati, riletti con le regole', funct
         && $record['tone'] === 'Caldo' && $record['language'] === 'it' && array_key_exists('logo_url', $record);
 });
 
+check('dominio dal sito: mai da un social o da un servizio di siti; caselle generiche per paese e PEC', function () {
+    $derived = static fn (string $site): string => (string) (BrandData::clean(['website' => $site], false)[0]['domain'] ?? '');
+    BrandData::addSiteHost('vetrine-mie.it');
+
+    return $derived('https://www.facebook.com/lapiana') === '' && $derived('https://lapiana.wixsite.com/menu') === ''
+        && $derived('https://sites.google.com/view/lapiana') === '' && $derived('https://linktr.ee/lapiana') === ''
+        && $derived('https://shop.vetrine-mie.it/lapiana') === '' && $derived('https://www.lapiana.it') === 'lapiana.it'
+        && BrandData::isMailProvider('yahoo.co.uk') && BrandData::isMailProvider('hotmail.fr') && BrandData::isMailProvider('gmx.de')
+        && BrandData::isMailProvider('pec.libero.it') && BrandData::isMailProvider('arubapec.it') && BrandData::isMailProvider('web.de')
+        && !BrandData::isMailProvider('live.events') && !BrandData::isMailProvider('yahoostore.it')
+        && BrandData::isSiteHost('instagram.com') && !BrandData::isSiteHost('lapiana.it');
+});
+
+check('byDomain: un brand con dominio di un social o di una casella generica non si riconosce mai', function () use ($brand) {
+    Query::reset(['company_brands' => [
+        1 => $brand(1, 'Social', ['domain' => 'facebook.com']),
+        2 => $brand(2, 'Yahoo', ['domain' => 'yahoo.co.uk']),
+        3 => $brand(3, 'La Piana', ['domain' => 'lapiana.it']),
+    ]]);
+
+    return CompanyBrands::byDomain('x@facebook.com') === null && CompanyBrands::byDomain('x@mail.facebook.com') === null
+        && CompanyBrands::byDomain('x@yahoo.co.uk') === null && (int) CompanyBrands::byDomain('x@lapiana.it')['id'] === 3;
+});
+
+check('form del brand: valori non scalari dalla richiesta valgono vuoto', function () use ($reject) {
+    Query::reset(['company_brands' => []]);
+    $name = $reject(static fn () => CompanyBrandResource::mutateRequestValues(['name' => ['x']], 'store'));
+    $values = CompanyBrandResource::mutateRequestValues(['name' => 'A', 'note' => ['x'], 'description' => ['y'], 'website' => ['z']], 'store');
+    $quick = CompanyBrandResource::quickCreateStore(['name' => ['x']], 'name');
+
+    return $name === 'contacts.brand_required' && $values['note'] === '' && $values['description'] === '' && $values['website'] === ''
+        && isset($quick['error']);
+});
+
 summary();

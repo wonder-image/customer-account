@@ -162,6 +162,35 @@ check('record: email principale invariata, recapiti in più in emails e phones; 
         && ContactRecord::validate($in) === ['emails.0' => 'invalid', 'phones.0' => 'invalid'];
 });
 
+check('DNS che non risponde: la scrittura non cancella le email salvate, il form le rifiuta', function () use ($seed, $token, $reject) {
+    $tables = $seed();
+    $tables['contact_points'][1] = ['id' => 1, 'contact_id' => 2, 'kind' => 'email', 'value' => 'a@rossi.test', 'label' => '', 'position' => 0, 'deleted' => 'false'];
+    Query::reset($tables);
+    $GLOBALS['__dns_ok'] = false;
+    $saved = ContactPoints::sync(ContactPoints::CONTACT, 2, [['kind' => 'email', 'value' => 'a@rossi.test'], ['kind' => 'email', 'value' => 'b@rossi.test']]);
+    $form = $reject(static fn () => ContactResource::mutateRequestValues(
+        ['name' => 'Anna', 'surname' => 'Bianchi', 'active' => 'true', '_csrf' => $token, 'contact_points_form' => '1', 'contact_points' => [['kind' => 'email', 'value' => 'c@rossi.test']]],
+        'update', 'backend', ['id' => 2]
+    ));
+    $brand = \Wonder\Plugin\CustomerAccount\Support\BrandData::clean(['email' => 'ordini@lapiana.it'], true);
+    unset($GLOBALS['__dns_ok']);
+
+    return array_column($saved, 'value') === ['a@rossi.test', 'b@rossi.test'] && isset(Query::$tables['contact_points'][1])
+        && $form === 'contacts.point_email_invalid' && $brand[0]['email'] === 'ordini@lapiana.it' && $brand[1] === [];
+});
+
+check('email: niente spazi, virgolette, apici, backtick né < > anche se FILTER_VALIDATE_EMAIL li accetta', function () {
+    $evil = '"<img/src=x/onerror=alert(1)>"@rossi.test';
+    [$rows, $problems] = ContactPoints::clean([['kind' => 'email', 'value' => $evil], ['kind' => 'email', 'value' => "o'brien@rossi.test"]]);
+    [, $brandErrors] = \Wonder\Plugin\CustomerAccount\Support\BrandData::clean(['email' => $evil], true);
+
+    return filter_var($evil, FILTER_VALIDATE_EMAIL) !== false
+        && !ContactPoints::emailFormat($evil) && !ContactPoints::validEmail($evil)
+        && !ContactPoints::emailFormat('"a b"@rossi.test') && !ContactPoints::emailFormat('a`b@rossi.test') && !ContactPoints::emailFormat('a\\b@rossi.test')
+        && ContactPoints::emailFormat('nome.cognome+ordini@rossi.test')
+        && $rows === [] && count($problems) === 2 && $brandErrors === ['email' => 'invalid'];
+});
+
 // Vincolo di sicurezza: un'email in più non aggancia mai una scheda né diventa l'email di accesso.
 $GLOBALS['__fake_users'] = [['id' => 7, 'email' => 'ada@example.com', 'name' => 'Ada', 'surname' => 'Lovelace']];
 

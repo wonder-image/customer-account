@@ -27,13 +27,36 @@ final class BrandData
     public const SOCIALS = ['facebook', 'instagram', 'linkedin', 'x', 'tiktok', 'youtube', 'pinterest', 'whatsapp'];
 
     /**
-     * Le caselle di posta generica: un'email da qui non dice di che brand è.
+     * Le caselle di posta generica e le PEC dei gestori: un'email da qui non
+     * dice di che brand è. Vale anche un loro sottodominio (`pec.libero.it`).
      * Altre con `addMailProvider()`.
      */
     public const MAIL_PROVIDERS = [
-        'gmail.com', 'googlemail.com', 'outlook.com', 'outlook.it', 'hotmail.com', 'hotmail.it', 'live.com', 'live.it', 'msn.com',
-        'yahoo.com', 'yahoo.it', 'icloud.com', 'me.com', 'mac.com', 'aol.com', 'gmx.com', 'gmx.it', 'proton.me', 'protonmail.com',
-        'libero.it', 'virgilio.it', 'alice.it', 'tim.it', 'tiscali.it', 'email.it', 'fastwebnet.it', 'inwind.it', 'pec.it', 'legalmail.it',
+        'gmail.com', 'googlemail.com', 'msn.com', 'icloud.com', 'me.com', 'mac.com', 'ymail.com', 'rocketmail.com',
+        'proton.me', 'protonmail.com', 'pm.me', 'tutanota.com', 'zoho.com', 'mail.com', 'web.de', 't-online.de',
+        'orange.fr', 'free.fr', 'laposte.net', 'wanadoo.fr',
+        'libero.it', 'virgilio.it', 'alice.it', 'tim.it', 'tin.it', 'tiscali.it', 'email.it', 'fastwebnet.it', 'inwind.it', 'iol.it',
+        'katamail.com', 'teletu.it', 'poste.it', 'aruba.it',
+        'pec.it', 'legalmail.it', 'arubapec.it', 'postecert.it', 'pec.poste.it', 'sicurezzapostale.it', 'registerpec.it', 'gigapec.it',
+        'pecimprese.it', 'mypec.eu', 'casellapec.com', 'pec.buffetti.it', 'cert.legalmail.it', 'postacertificata.gov.it',
+    ];
+
+    /**
+     * I gestori con un dominio per paese: `yahoo.it`, `hotmail.fr`,
+     * `yahoo.co.uk`, `gmx.de` (il nome seguito da uno o due pezzi corti).
+     */
+    public const MAIL_PROVIDER_NAMES = ['yahoo', 'hotmail', 'live', 'outlook', 'gmx', 'yandex', 'aol'];
+
+    /**
+     * Social, siti fatti con un servizio e motori: il sito di un brand qui non
+     * dice il suo dominio (`facebook.com/lapiana`). Vale anche un loro
+     * sottodominio (`lapiana.wixsite.com`). Altri con `addSiteHost()`.
+     */
+    public const SITE_HOSTS = [
+        'facebook.com', 'fb.com', 'instagram.com', 'linkedin.com', 'tiktok.com', 'youtube.com', 'youtu.be', 'x.com', 'twitter.com',
+        'pinterest.com', 'threads.net', 'wa.me', 'whatsapp.com', 'linktr.ee', 'wixsite.com', 'wix.com', 'wordpress.com',
+        'blogspot.com', 'google.com', 'goo.gl', 'business.site', 'tripadvisor.com', 'tripadvisor.it', 'booking.com',
+        'github.io', 'netlify.app', 'vercel.app', 'shopify.com', 'myshopify.com', 'squarespace.com', 'jimdo.com', 'webnode.it',
     ];
 
     /** Al massimo tanti colori in un brand kit. */
@@ -44,6 +67,9 @@ final class BrandData
 
     /** @var list<string> caselle generiche aggiunte */
     private static array $extraProviders = [];
+
+    /** @var list<string> social e servizi di siti aggiunti */
+    private static array $extraSiteHosts = [];
 
     /**
      * I social per un select: quelli di base e quelli aggiunti.
@@ -81,12 +107,54 @@ final class BrandData
         }
     }
 
-    /** È una casella di posta generica (gmail.com, outlook.com, …)? */
+    /** È una casella di posta generica (gmail.com, yahoo.co.uk, una PEC di un gestore, …) o un suo sottodominio? */
     public static function isMailProvider(string $domain): bool
     {
         $domain = self::domain($domain) ?? '';
 
-        return $domain !== '' && (in_array($domain, self::MAIL_PROVIDERS, true) || in_array($domain, self::$extraProviders, true));
+        if ($domain === '') {
+            return false;
+        }
+
+        $labels = explode('.', $domain);
+        $rest = array_slice($labels, 1);
+
+        if (in_array($labels[0], self::MAIL_PROVIDER_NAMES, true) && count($rest) <= 2
+            && array_filter($rest, static fn (string $label): bool => strlen($label) > 3) === []) {
+            return true;
+        }
+
+        return self::within($domain, [...self::MAIL_PROVIDERS, ...self::$extraProviders]);
+    }
+
+    /** Aggiunge un social o un servizio di siti (es. `ilmiosito.it` di un rivenditore). */
+    public static function addSiteHost(string $domain): void
+    {
+        $domain = self::domain($domain);
+
+        if ($domain !== null && $domain !== '' && !in_array($domain, self::$extraSiteHosts, true)) {
+            self::$extraSiteHosts[] = $domain;
+        }
+    }
+
+    /** È un social o un servizio di siti (facebook.com, lapiana.wixsite.com, …)? */
+    public static function isSiteHost(string $domain): bool
+    {
+        $domain = self::domain($domain) ?? '';
+
+        return $domain !== '' && self::within($domain, [...self::SITE_HOSTS, ...self::$extraSiteHosts]);
+    }
+
+    /** Il dominio è uno della lista o un suo sottodominio? @param list<string> $list */
+    private static function within(string $domain, array $list): bool
+    {
+        foreach ($list as $item) {
+            if ($domain === $item || str_ends_with($domain, '.'.$item)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -228,7 +296,9 @@ final class BrandData
     /**
      * I dati postati, ripuliti, e gli errori (campo → `invalid`). Passano solo
      * i campi per tutti e, con `$kit`, quelli del kit: gli altri si ignorano.
-     * Il dominio vuoto si ricava dal sito, tranne una casella generica.
+     * Il dominio vuoto si ricava dal sito, tranne quando il sito sta su un
+     * social, un servizio di siti (`facebook.com/lapiana`, `x.wixsite.com`) o
+     * una casella generica: lì il dominio non è del brand.
      *
      * @param array<string, mixed> $values
      * @return array{0: array<string, string>, 1: array<string, string>}
@@ -269,7 +339,7 @@ final class BrandData
         if (($out['domain'] ?? '') === '' && ($out['website'] ?? '') !== '' && !isset($errors['domain'])) {
             $domain = (string) self::domain($out['website']);
 
-            if ($domain !== '' && !self::isMailProvider($domain)) {
+            if ($domain !== '' && !self::isMailProvider($domain) && !self::isSiteHost($domain)) {
                 $out['domain'] = $domain;
             }
         }
@@ -311,16 +381,14 @@ final class BrandData
     {
         $value = is_scalar($value) ? strtolower(trim((string) $value)) : '';
 
-        return $value === '' || ContactPoints::validEmail($value) ? $value : null;
+        // Solo il formato: niente DNS, che non deve decidere cosa si salva.
+        return $value === '' || ContactPoints::emailFormat($value) ? $value : null;
     }
 
     private static function text(mixed $value, int $max): ?string
     {
-        if (!is_scalar($value) && $value !== null) {
-            return null;
-        }
-
-        $value = trim((string) $value);
+        // Un valore non scalare dalla richiesta (`x[]=1`) vale vuoto.
+        $value = is_scalar($value) ? trim((string) $value) : '';
 
         return mb_strlen($value) > $max ? null : $value;
     }

@@ -51,9 +51,14 @@ final class CompanyBrands
      * Il brand di un'email in arrivo o di un dominio («ordini@lapiana.it»,
      * «https://www.lapiana.it»), dal campo `domain`: vale anche un
      * sottodominio («news.lapiana.it»). Una casella generica (gmail.com,
-     * outlook.com, …: `BrandData::MAIL_PROVIDERS`) non corrisponde mai, né un
-     * brand archiviato. Se più brand hanno lo stesso dominio vince il brand
-     * principale delle sue linee; altrimenti non tira a indovinare: null.
+     * yahoo.*, le PEC dei gestori, …: `BrandData::isMailProvider()`) o un
+     * social / servizio di siti (`BrandData::isSiteHost()`) non corrisponde
+     * mai, né un brand archiviato. Se più brand hanno lo stesso dominio vince
+     * il brand principale delle sue linee; altrimenti non tira a indovinare: null.
+     *
+     * È un suggerimento (proporre il brand di un'email in arrivo), non una
+     * prova: chiunque può scrivere da un dominio. Non va mai usato per
+     * agganciare un account, una scheda o dei dati.
      *
      * @return array<string, mixed>|null
      */
@@ -63,7 +68,7 @@ final class CompanyBrands
         $at = strrpos($value, '@');
         $domain = BrandData::domain($at !== false ? substr($value, $at + 1) : $value);
 
-        if ($domain === null || $domain === '' || BrandData::isMailProvider($domain)) {
+        if ($domain === null || $domain === '' || BrandData::isMailProvider($domain) || BrandData::isSiteHost($domain)) {
             return null;
         }
 
@@ -74,7 +79,7 @@ final class CompanyBrands
         for ($i = 0; $i < count($labels) - 1; $i++) {
             $candidate = implode('.', array_slice($labels, $i));
 
-            if (!BrandData::isMailProvider($candidate)) {
+            if (!BrandData::isMailProvider($candidate) && !BrandData::isSiteHost($candidate)) {
                 $candidates[] = $candidate;
             }
         }

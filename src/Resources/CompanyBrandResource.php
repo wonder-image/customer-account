@@ -197,6 +197,13 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
 
         $values = $data + array_intersect_key($values, array_flip(['name', 'note', 'archived', 'parent_id']));
 
+        // Un valore non scalare dalla richiesta (`note[]=x`) vale vuoto.
+        foreach (['name', 'note'] as $field) {
+            if (array_key_exists($field, $values) && !is_scalar($values[$field])) {
+                $values[$field] = '';
+            }
+        }
+
         // Un file o il suo ordine, mai un testo: un percorso o un URL scritti a mano non diventano il logo.
         if (is_array($upload) && isset($upload['name'])) {
             $values['logo'] = $upload;
@@ -206,7 +213,7 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
             $values['logo__wi_files'] = $manifest;
         }
 
-        $name = trim((string) ($values['name'] ?? ''));
+        $name = is_scalar($values['name'] ?? null) ? trim((string) $values['name']) : '';
         $id = (int) ($oldValues['id'] ?? 0);
 
         if ($name === '') {
@@ -260,7 +267,7 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
     /** Il «+» della scheda azienda: un nome che c'è già riprende quel brand. */
     public static function quickCreateStore(array $values, string $labelField): array
     {
-        $result = CompanyBrands::findOrCreate((string) ($values['name'] ?? ''));
+        $result = CompanyBrands::findOrCreate(is_scalar($values['name'] ?? null) ? (string) $values['name'] : '');
 
         if ($result === null) {
             return ['error' => (string) __t('contacts.brand_not_created')];

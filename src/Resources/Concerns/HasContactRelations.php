@@ -183,8 +183,14 @@ trait HasContactRelations
             ->label('');
     }
 
+    /** @var list<int> le controparti già legate alla scheda del form, lette da `hydrateRepeaterFormValues()` */
+    protected static array $relationLinkedIds = [];
+
     /**
-     * Le schede dell'altro lato per il select di una riga.
+     * Le schede dell'altro lato per il select di una riga. Con un filtro
+     * (`ContactRelations::useCounterpartFilter()`) solo le ammesse più quelle
+     * già legate alla scheda del form: altrimenti chi non le vede le
+     * staccherebbe salvando.
      *
      * @return array<int, string>
      */
@@ -210,6 +216,8 @@ trait HasContactRelations
             }
         }
 
+        $keep = [...ContactRelations::allowedCounterparts($parentColumn, array_keys($options)), ...static::$relationLinkedIds];
+        $options = array_intersect_key($options, array_flip($keep));
         asort($options, SORT_NATURAL | SORT_FLAG_CASE);
 
         return $options;
@@ -258,6 +266,8 @@ trait HasContactRelations
         ?array $post = null,
         ?array $files = null
     ): array {
+        // Prima dei campi: il presenter chiama `formSchema()` dopo, e le scelte devono comprendere i legami di oggi.
+        static::$relationLinkedIds = ContactRelations::linkedIds(static::relationSide(), (int) ($parentId ?? 0));
         $values = static::withContactPointValues(parent::hydrateRepeaterFormValues($values, $parentId, $post, $files), $parentId);
 
         $input = static::relationInputName();

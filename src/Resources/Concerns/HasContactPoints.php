@@ -85,7 +85,8 @@ trait HasContactPoints
         }
 
         $posted = $values[static::$pointsInput] ?? [];
-        [, $problems] = ContactPoints::clean(is_array($posted) ? array_values($posted) : [], $values + ($oldValues ?? []));
+        // Qui sì il controllo del dominio (DNS): è il form, che può dire cosa non va.
+        [, $problems] = ContactPoints::clean(is_array($posted) ? array_values($posted) : [], $values + ($oldValues ?? []), true);
 
         if ($problems !== []) {
             throw new InvalidArgumentException(implode("\n", $problems));
