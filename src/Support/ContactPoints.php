@@ -271,8 +271,12 @@ final class ContactPoints
      * `phone_prefix`, `label`, `is_primary` e, per le aziende, `departments`.
      *
      * La regola sta qui e non nel form: al massimo un principale per tipo (il
-     * primo segnato; gli altri tornano righe normali), la prima riga del tipo
-     * se nessuna è segnata, nessuna riga del tipo = colonne vuote. Con
+     * primo segnato; gli altri tornano righe normali). Se nessuna è segnata
+     * resta il principale di prima, poi la prima riga nuova; un contatto in
+     * più già salvato (`$saved`, le righe di `of()`) sale a principale solo se
+     * un principale c'era ed è stato tolto: una scheda senza principale non
+     * ne guadagna uno a ogni salvataggio. Nessuna riga del tipo = colonne
+     * vuote; senza telefono né prima né dopo `phone_prefix` non compare. Con
      * `lockedEmail()` l'email della scheda non cambia: la sua riga si salta,
      * le altre email restano righe normali e `columns` non porta `email`.
      * Le colonne `locked` e `label = access` postate non contano.
@@ -286,13 +290,19 @@ final class ContactPoints
      *
      * @param list<mixed> $rows
      * @param array<string, mixed> $card la scheda salvata (`user_id`, `email`); vuota per una scheda nuova
+     * @param list<array<string, mixed>> $saved i contatti in più già salvati della scheda
      * @return array{columns: array<string, string>, rows: list<array<string, mixed>>, problems: list<string>, kept: list<string>}
      */
-    public static function split(string $owner, array $rows, array $card = [], bool $checkDomain = false): array
+    public static function split(string $owner, array $rows, array $card = [], bool $checkDomain = false, array $saved = []): array
     {
         self::model($owner);
         $locked = self::lockedEmail($owner, $card);
         $stored = [];
+        $extra = [];
+
+        foreach ($saved as $row) {
+            $extra[($row['kind'] ?? '').'|'.($row['value'] ?? '')] = true;
+        }
 
         foreach (self::primaryRows($card) as $row) {
             $stored[$row['kind']] = $row;
@@ -385,14 +395,30 @@ final class ContactPoints
                 continue;
             }
 
-            // Nessuna segnata: la prima del tipo.
+            // Nessuna segnata: resta il principale di prima, poi la prima riga nuova;
+            // un contatto in più già salvato sale solo se un principale c'era.
             if ($primary === null) {
+                $first = null;
+                $fresh = null;
+
                 foreach ($kept as $i => $row) {
-                    if ($row['kind'] === $kind) {
+                    if ($row['kind'] !== $kind) {
+                        continue;
+                    }
+
+                    if (isset($stored[$kind]) && $row['value'] === $stored[$kind]['value']) {
                         $primary = $i;
                         break;
                     }
+
+                    $first ??= $i;
+
+                    if (!isset($extra[$kind.'|'.$row['value']])) {
+                        $fresh ??= $i;
+                    }
                 }
+
+                $primary ??= $fresh ?? (isset($stored[$kind]) ? $first : null);
             }
 
             if ($primary !== null) {
@@ -404,7 +430,11 @@ final class ContactPoints
             if ($kind === self::EMAIL) {
                 $columns['email'] = (string) ($row['value'] ?? '');
             } else {
-                $columns['phone_prefix'] = (string) ($row['phone_prefix'] ?? '');
+                // Senza telefono né prima né dopo il prefisso salvato resta com'è.
+                if ($row !== null || isset($stored[$kind])) {
+                    $columns['phone_prefix'] = (string) ($row['phone_prefix'] ?? '');
+                }
+
                 $columns['phone'] = (string) ($row['value'] ?? '');
             }
         }
@@ -484,7 +514,7 @@ final class ContactPoints
             return [];
         }
 
-        $split = self::split($owner, $rows, $card);
+        $split = self::split($owner, $rows, $card, false, self::of($owner, $ownerId));
 
         Transaction::run(static function () use ($owner, $model, $ownerModel, $ownerId, $card, $split): void {
             $before = $owner === self::COMPANY ? self::currentKeys($owner, $ownerId, $card) : [];
