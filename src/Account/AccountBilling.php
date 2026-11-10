@@ -3,6 +3,7 @@
 namespace Wonder\Plugin\CustomerAccount\Account;
 
 use Wonder\App\Schema\Extensions\AddressExtension;
+use Wonder\App\Support\GoogleMaps;
 use Wonder\Auth\Frontend\AccountAddressValidation;
 use Wonder\Plugin\CustomerAccount\Models\Company;
 use Wonder\Plugin\CustomerAccount\Models\Contact;
@@ -33,7 +34,7 @@ final class AccountBilling
         if ($id <= 0) {
             return (object) ['success' => false, 'messages' => [(string) __t('account.errors.contact')]];
         }
-        $values = array_intersect_key($input, $billing->labels());
+        $values = array_intersect_key($input, $billing->labels()) + self::geo($input);
         $messages = AccountAddressValidation::validate($billing, $values);
         if ($messages !== []) {
             return (object) ['success' => false, 'messages' => $messages];
@@ -43,6 +44,15 @@ final class AccountBilling
         return ($result->success ?? false)
             ? (object) ['success' => true, 'messages' => []]
             : (object) ['success' => false, 'messages' => [(string) __t('account.errors.save')]];
+    }
+
+    /**
+     * Place ID e coordinate dell'indirizzo, ripuliti, solo se il form li ha
+     * postati: un salvataggio senza (un'API, un modulo) non li azzera.
+     */
+    public static function geo(array $input): array
+    {
+        return array_intersect_key($input, array_flip(['place_id', 'lat', 'lng'])) !== [] ? GoogleMaps::cleanGeo($input) : [];
     }
 
     /** Una sola riga: intestatario, codice fiscale, indirizzo. I dati da società stanno sulle aziende. */

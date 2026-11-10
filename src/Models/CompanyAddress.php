@@ -27,6 +27,7 @@ class CompanyAddress extends Model
         return [
             Column::key('company_id')->int()->null(false)->foreign(Company::$table),
             Column::key('label')->length(100),
+            static::businessNameColumn(),
             ...static::address()->tableSchema(),
             Column::key('is_default')->enum(['true', 'false'])->default('false'),
             Column::key('position')->int(),
@@ -45,6 +46,7 @@ class CompanyAddress extends Model
         return [
             Field::key('company_id')->number()->decimals(0),
             Field::key('label')->text(),
+            Field::key('business_name')->text(),
             ...static::address()->dataSchema(),
             Field::key('is_default')->text()->sanitize(false),
             Field::key('position')->number()->decimals(0),

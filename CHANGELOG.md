@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- Richiede wonder-image/app `^2.4.0-beta.6`: la ricerca dell'indirizzo per nome dell'attività usa `AddressExtension::withNameSearch()`.
+
 ### Breaking
 
 - Le aziende non sono più schede di `contacts`: stanno in `companies` / `company_addresses` (`Company`, `CompanyAddress`, `CompanyResource` su `/backend/companies/`, `CompanyAddressResource`). `contacts` perde `type`, `business_name`, `pi`, `sdi`, `pec` e `is_supplier`; i fornitori sono sempre aziende.
@@ -14,6 +18,18 @@
 - Il reparto singolo del referente diventa «Si occupa di», più aree per legame: `contact_relations.department` esce dallo schema (la toglie `runTables()` dopo `Migrations\RelationDepartmentsMigration`, che la copia in `contact_relation_departments`). Nessuna area = si occupa di tutto. `ContactRelations::normalize()` non porta più `department`; `peopleByDepartment()` comprende chi si occupa di tutto; la colonna del repeater è `departments` (select multipla, `departmentsColumn()` al posto di `departmentColumn()`); le chiavi `contacts.department` / `department_none` diventano `contacts.departments`. In lettura le righe di `peopleOf()` / `companiesOf()` e i record portano ancora `department` (la prima area, o vuoto) accanto a `departments`; `sync()` accetta ancora `department` (un valore).
 - `ContactRelations::sync()` scrive legami, brand seguiti e aree in una transazione; `contact.linked` / `contact.unlinked` partono dopo il commit (`contact.created` per le persone create al volo resta prima).
 - `ContactRecord` passa a `SCHEMA` 3 (`emails`, `phones`, `departments` nei legami), `CompanyRecord` a `SCHEMA` 4 (in più i dati dei brand).
+- Riquadro «Contatti» al posto dei campi `email`, `phone_prefix`, `phone` e di «Altri contatti» nei form di `ContactResource` e `CompanyResource` (input `contact_points` con colonne `kind`, `email`, `phone_prefix`, `phone`, `label`, `is_primary`, per le aziende `departments`; marker `contact_box_form`). Il principale resta nelle colonne della scheda; senza marker i campi singoli si salvano come prima.
+- `ContactRecord` passa a `SCHEMA` 4, `CompanyRecord` a 5: `emails` / `phones` portano tutti i contatti, il principale per primo con `is_primary` (prima solo quelli in più), le aziende anche `departments`; i legami `work_email`, `work_phone_prefix`, `work_phone`; la scheda `place_id`, `lat`, `lng`.
+- `ContactRelations::normalize()` porta anche `email`, `phone_prefix`, `phone` (i contatti di lavoro); le righe di `peopleOf()` / `peopleFor()` / `companiesOf()` portano in più le colonne del legame `email` / `phone_prefix` / `phone` (di lavoro: la persona resta sotto `contact`), `work_*` e `contact_email`.
+- I messaggi dei contatti non validi iniziano con «Contatti:» e non più «Altri contatti:».
+
+### Added
+
+- Riquadro «Contatti» con «Principale» (persone e aziende): `HasContactPoints::contactBoxFields()`, `applyContactPoints()`, `usesContactBox()`, `contactFormScript()`; `ContactPoints::all()`, `formRows()`, `split()`, `syncAll()`, `lockedEmail()`, `cleanEmail()`, `ACCESS_LABEL`. Un principale per tipo (regola lato server), la prima riga se nessuna lo è, scambio senza perdere la vecchia principale. Una persona con account tiene `contacts.email` («Email di accesso», riga bloccata): il riquadro non la cambia e non promuove un'altra email.
+- «Si occupa di» sui contatti delle aziende: tabella `company_point_departments` (`Models\CompanyPointDepartment`, per valore, così l'area segue l'email quando cambia il principale), `ContactPoints::companyEmailsFor($companyId, $department = '')` per i destinatari a livello di azienda.
+- Contatti di lavoro del referente sul legame: `contact_relations.email`, `phone_prefix`, `phone`, colonne nei repeater dei legami (`HasContactRelations::workContactColumns()`), `ContactRelations::workContacts()` (formato senza DNS, valori non validi o non scalari vuoti, riga senza chiave tiene quelli di prima), `HasContactRelations::assertRelationContacts()` (DNS nel form), `contact_email` nelle letture. Mai email di accesso.
+- Indirizzi: ricerca anche per nome dell'attività (`withNameSearch()`) in fatturazione e consegna; place ID e coordinate anche sulla fatturazione di persone e aziende (`withGeo()`: colonne `place_id`, `lat`, `lng`), salvati dal backend, da `AccountBilling` e dalla registrazione solo se postati (`AccountBilling::geo()`); «Presso» (`business_name`) negli indirizzi di consegna di persone e aziende. Il nome dell'attività scelta riempie «Presso» (o la ragione sociale vuota di un'azienda).
+- Script dei form del modulo (`resources/assets/js/contact-form.js`, `Support\ContactFormScript`): colonne del riquadro per tipo, un principale per tipo a schermo, riga dell'email di accesso bloccata, nome dell'attività scelta. Supplisce a due mancanze di core e lib descritte nel README.
 
 ### Added
 

@@ -22,11 +22,15 @@ class Contact extends Model
     public static string $folder = 'contacts';
     public static string $icon = 'bi bi-person-vcard';
 
-    /** Fatturazione da privato: nome, cognome, CF e indirizzo. */
+    /**
+     * Fatturazione da privato: nome, cognome, CF e indirizzo, con place ID e
+     * coordinate (`place_id`, `lat`, `lng`) e la ricerca anche per nome
+     * dell'attività.
+     */
     public static function billing(): AddressExtension
     {
         // Niente link a Google Maps: l'indirizzo di fatturazione non si visita.
-        return AddressExtension::billing(countryDefault: 'IT')->withLink(false)->asPrivate();
+        return AddressExtension::billing(countryDefault: 'IT')->withLink(false)->asPrivate()->withGeo()->withNameSearch();
     }
 
     /** Operational identities must not travel through configuration sync. */

@@ -191,6 +191,7 @@ final class ContactRelations
                 'is_primary' => self::flag($row['is_primary'] ?? 'false'),
                 'receives_documents' => self::flag($row['receives_documents'] ?? 'false'),
                 'access' => $access,
+            ] + self::workContacts($row, $stored ?? []) + [
                 'deleted' => 'false',
             ];
 
@@ -208,6 +209,25 @@ final class ContactRelations
         }
 
         return $rows;
+    }
+
+    /**
+     * I contatti di lavoro di una riga (`email`, `phone_prefix`, `phone`),
+     * ripuliti come i contatti della scheda ma senza DNS: email in minuscolo
+     * e di formato valido, telefono a sole cifre, prefisso `+NN`. Un valore
+     * non valido (o non scalare) vale vuoto; una riga senza la chiave tiene
+     * quello salvato. Il controllo del dominio lo fa il form
+     * (`HasContactRelations::assertRelationContacts()`).
+     *
+     * @return array{email: string, phone_prefix: string, phone: string}
+     */
+    public static function workContacts(array $row, array $stored = []): array
+    {
+        $email = array_key_exists('email', $row) ? ContactPoints::cleanEmail($row['email']) : (string) ($stored['email'] ?? '');
+        $phone = array_key_exists('phone', $row) ? (ContactPoints::phoneNumber($row['phone']) ?? '') : (string) ($stored['phone'] ?? '');
+        $prefix = array_key_exists('phone_prefix', $row) ? (ContactPoints::phonePrefix($row['phone_prefix']) ?? '') : (string) ($stored['phone_prefix'] ?? '');
+
+        return ['email' => $email, 'phone_prefix' => $phone !== '' ? $prefix : '', 'phone' => $phone];
     }
 
     /** `'true'` o `'false'` da quello che arriva da un select, un checkbox o un booleano. */
@@ -428,6 +448,9 @@ final class ContactRelations
      * I referenti di un'azienda, in ordine: ogni riga del legame con la
      * scheda della persona sotto `contact` e le aree in `departments`
      * (vuota = tutte; `department` è la prima, per chi leggeva il reparto).
+     * I contatti di lavoro sono in `work_email`, `work_phone_prefix`,
+     * `work_phone`; `contact_email` è l'email a cui scrivergli per
+     * quest'azienda (di lavoro se c'è, altrimenti la sua).
      *
      * @param int $brandId se c'è, solo chi segue quel brand o tutti i brand
      * @return list<array<string, mixed>>
@@ -638,8 +661,8 @@ final class ContactRelations
      * Crea, o riapre, il solo legame fra un'azienda e una persona, senza
      * ripassare né toccare gli altri legami dell'una o dell'altra (la
      * creazione rapida). `$values` come una riga di `sync()` (`job_title`,
-     * `is_primary`, `receives_documents`, `access`, `departments`, `brand_ids`);
-     * `access` è `none` se non c'è, e passa da `useAccessGuard()`. Un legame
+     * `is_primary`, `receives_documents`, `access`, `departments`, `brand_ids`,
+     * `email`, `phone_prefix`, `phone`); `access` è `none` se non c'è, e passa da `useAccessGuard()`. Un legame
      * già vivo non cambia: per modificarlo c'è `sync()`. Stessa transazione e
      * stessi eventi di `sync()` (`contact.linked` dopo il commit). Non applica
      * il filtro delle controparti: chi chiama sa già che le due schede si vedono.
@@ -755,7 +778,8 @@ final class ContactRelations
      * passano da qui.
      *
      * `$rows` sono le righe grezze dell'altro lato (`person_id` o `company_id`,
-     * `job_title`, `departments`, `is_primary`, `receives_documents`, `access`, `brand_ids`; dal lato azienda anche
+     * `job_title`, `departments`, `is_primary`, `receives_documents`, `access`, `brand_ids`,
+     * i contatti di lavoro `email`, `phone_prefix`, `phone` (vedi `workContacts()`); dal lato azienda anche
      * `new_name`, `new_surname`, `new_email` per creare la persona). Le righe non
      * presenti si cancellano (soft delete). Una riga senza `departments` (o
      * senza il vecchio `department`) tiene le aree di prima, come `brand_ids`.
@@ -1026,6 +1050,8 @@ final class ContactRelations
         $key = $parentColumn === self::COMPANY ? 'contact' : 'company';
         $relations = self::rows(ContactRelation::find([$parentColumn => $parentId], null, 'position', 'ASC'));
         $areas = self::departmentsByRelation(array_map(static fn (array $row): int => (int) $row['id'], $relations));
+        // Dal lato della persona l'email di ripiego è la sua: si legge una volta.
+        $person = $parentColumn === self::PERSON && $relations !== [] ? Contact::findById($parentId) : null;
         $out = [];
 
         foreach ($relations as $row) {
@@ -1033,11 +1059,32 @@ final class ContactRelations
 
             if (is_array($record) && isset($record['id'])) {
                 $departments = $areas[(int) $row['id']] ?? [];
-                $out[] = ['departments' => $departments, 'department' => $departments[0] ?? ''] + $row + [$key => $record];
+                $personEmail = (string) (($parentColumn === self::COMPANY ? $record : $person)['email'] ?? '');
+                $out[] = ['departments' => $departments, 'department' => $departments[0] ?? ''] + self::workFields($row, $personEmail) + $row + [$key => $record];
             }
         }
 
         return $out;
+    }
+
+    /**
+     * I contatti di lavoro di un legame per chi legge: `work_email`,
+     * `work_phone_prefix`, `work_phone` e `contact_email`, l'email da usare
+     * per scrivere al referente per quell'azienda (quella di lavoro, se c'è,
+     * altrimenti la sua).
+     *
+     * @return array{work_email: string, work_phone_prefix: string, work_phone: string, contact_email: string}
+     */
+    private static function workFields(array $relation, string $personEmail): array
+    {
+        $email = (string) ($relation['email'] ?? '');
+
+        return [
+            'work_email' => $email,
+            'work_phone_prefix' => (string) ($relation['phone_prefix'] ?? ''),
+            'work_phone' => (string) ($relation['phone'] ?? ''),
+            'contact_email' => $email !== '' ? $email : strtolower(trim($personEmail)),
+        ];
     }
 
     /** Un id da un valore della richiesta: un valore non scalare (`x[]=1`) vale 0. */

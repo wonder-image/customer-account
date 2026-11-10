@@ -2,6 +2,7 @@
 
 namespace Wonder\Plugin\CustomerAccount\Resources\Concerns;
 
+use InvalidArgumentException;
 use Throwable;
 use Wonder\App\ResourceSchema\FormField;
 use Wonder\App\ResourceSchema\Input;
@@ -10,6 +11,7 @@ use Wonder\App\ResourceSchema\RepeaterRelation;
 use Wonder\App\Support\Repeater;
 use Wonder\Plugin\CustomerAccount\Models\ContactRelation;
 use Wonder\Plugin\CustomerAccount\Support\CompanyBrands;
+use Wonder\Plugin\CustomerAccount\Support\ContactPoints;
 use Wonder\Plugin\CustomerAccount\Support\ContactRelations;
 
 /**
@@ -23,10 +25,12 @@ use Wonder\Plugin\CustomerAccount\Support\ContactRelations;
  * qui il repeater si salva solo se il form l'ha mostrato (campo
  * `contact_relations_form`).
  *
- * Porta con sé `HasContactPoints` («Altri contatti»): la Resource che lo
- * mostra mette `contactPointFields()` nel form e chiama
- * `assertContactPoints()` in `mutateRequestValues()`; lettura e scrittura
- * passano da qui.
+ * Porta con sé `HasContactPoints` (il riquadro «Contatti» o «Altri
+ * contatti»): la Resource mette `contactBoxFields()` (o
+ * `contactPointFields()`) nel form e chiama `applyContactPoints()` in
+ * `mutateRequestValues()`; lettura e scrittura passano da qui. Le righe dei
+ * legami hanno i contatti di lavoro (`workContactColumns()`), controllati
+ * dal form con `assertRelationContacts()`.
  */
 trait HasContactRelations
 {
@@ -74,6 +78,7 @@ trait HasContactRelations
             ),
             RepeaterColumn::key('job_title')->text()->label(static::relationText('job_title'))->columnSpan(3),
             static::departmentsColumn(),
+            ...static::workContactColumns(),
             ...static::relationFlagColumns(),
             static::relationBrandsColumn(),
         ], static::relationText('add_person'));
@@ -92,8 +97,64 @@ trait HasContactRelations
             ),
             RepeaterColumn::key('job_title')->text()->label(static::relationText('job_title'))->columnSpan(3),
             static::departmentsColumn(),
+            ...static::workContactColumns(),
             ...static::relationFlagColumns(),
         ], static::relationText('add_company'));
+    }
+
+    /**
+     * Email e telefono di lavoro del referente per quell'azienda
+     * (facoltativi): colonne di `contact_relations`, ripulite da
+     * `ContactRelations::workContacts()`. Mai un'email di accesso.
+     *
+     * @return list<Input>
+     */
+    protected static function workContactColumns(): array
+    {
+        return [
+            RepeaterColumn::key('email')->email()->label(static::relationText('work_email'))->columnSpan(6),
+            RepeaterColumn::key('phone_prefix')->phonePrefix()->label(static::relationText('work_phone_prefix'))->columnSpan(2),
+            RepeaterColumn::key('phone')->tel()->label(static::relationText('work_phone'))->columnSpan(4),
+        ];
+    }
+
+    /**
+     * Rifiuta il salvataggio se un contatto di lavoro postato nel repeater dei
+     * legami non va: email di formato o dominio non valido (qui sì il DNS: è
+     * il form), telefono o prefisso non numerici. Senza `contact_relations_form`
+     * non controlla niente. Le Resource lo chiamano in `mutateRequestValues()`
+     * con il POST intero: il repeater lì non c'è più (`stripRelationInputValues()`).
+     */
+    protected static function assertRelationContacts(array $post): void
+    {
+        $rows = $post[static::relationInputName()] ?? null;
+
+        if (!isset($post[self::RELATION_MARKER]) || !is_array($rows)) {
+            return;
+        }
+
+        $problems = [];
+
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $email = is_scalar($row['email'] ?? null) ? strtolower(trim((string) $row['email'])) : '';
+            $phone = $row['phone'] ?? '';
+
+            if ($email !== '' && !ContactPoints::validEmail($email)) {
+                $problems[] = (string) __t('contacts.work_email_invalid', ['value' => mb_substr($email, 0, 80)]);
+            }
+
+            if (ContactPoints::phoneNumber($phone) === null || (ContactPoints::phoneNumber($phone) !== '' && ContactPoints::phonePrefix($row['phone_prefix'] ?? '') === null)) {
+                $problems[] = (string) __t('contacts.work_phone_invalid', ['value' => is_scalar($phone) ? mb_substr((string) $phone, 0, 40) : '']);
+            }
+        }
+
+        if ($problems !== []) {
+            throw new InvalidArgumentException(implode("\n", array_values(array_unique($problems))));
+        }
     }
 
     /**

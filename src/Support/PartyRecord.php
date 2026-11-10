@@ -4,22 +4,29 @@ namespace Wonder\Plugin\CustomerAccount\Support;
 
 use Throwable;
 use Wonder\App\Models\System\ExternalReference;
+use Wonder\App\Support\GoogleMaps;
 
 /**
  * La parte comune di `ContactRecord` e `CompanyRecord`: la forma stabile di
  * una scheda per export, import e sync verso un CRM o un sistema di newsletter.
  *
  * `from()` legge la scheda e la porta in un array serializzabile (versione in
- * `schema`): i campi della scheda, i recapiti in più (`emails`, `phones`:
- * `email` resta quella principale), i legami azienda/persona visti dal suo
- * lato con le aree del referente, gli id esterni di `external_references`. `fromArray()` e `validate()`
+ * `schema`): i campi della scheda con place ID e coordinate della
+ * fatturazione, tutti i contatti (`emails`, `phones`, il principale per primo
+ * con `is_primary`; `email` e `phone` restano i principali), i legami
+ * azienda/persona visti dal suo lato con le aree e i contatti di lavoro del
+ * referente, gli id esterni di `external_references`. `fromArray()` e `validate()`
  * fanno il viaggio inverso per un import. Nessuna scrittura qui: i legami si
  * salvano con `ContactRelations::sync()`.
  */
 abstract class PartyRecord
 {
-    /** 3: i legami portano `departments` (le aree), la scheda `emails` e `phones` (i recapiti in più). */
-    public const SCHEMA = 3;
+    /**
+     * 3: i legami portano `departments` (le aree), la scheda `emails` e `phones` (i recapiti in più).
+     * 4: `emails` e `phones` sono tutti i contatti, il principale per primo con `is_primary`; i
+     * legami portano `work_email`, `work_phone_prefix`, `work_phone`; la scheda `place_id`, `lat`, `lng`.
+     */
+    public const SCHEMA = 4;
 
     /** L'entità in `external_references` (`contact`, `company`). */
     abstract public static function entity(): string;
@@ -58,9 +65,10 @@ abstract class PartyRecord
             $record[$field] = isset($row[$field]) ? (string) $row[$field] : '';
         }
 
+        $record += self::geo($row);
         $record['is_customer'] = ($row['is_customer'] ?? 'true') === 'true';
         $record['active'] = ($row['active'] ?? 'true') === 'true';
-        $points = ContactPoints::of(static::entity(), $id);
+        $points = ContactPoints::all(static::entity(), $id, $row);
         $record['emails'] = self::points($points, ContactPoints::EMAIL);
         $record['phones'] = self::points($points, ContactPoints::PHONE);
         $record['relations'] = self::relations($id);
@@ -94,6 +102,11 @@ abstract class PartyRecord
             if (isset($out[$field])) {
                 $out[$field] = strtolower($out[$field]);
             }
+        }
+
+        // Le coordinate valgono solo in coppia e nei limiti: un valore storto diventa null.
+        if (array_intersect_key($input, array_flip(['place_id', 'lat', 'lng'])) !== []) {
+            $out += self::geo(GoogleMaps::cleanGeo($input));
         }
 
         foreach (['emails', 'phones', 'relations', 'external_ids'] as $key) {
@@ -137,7 +150,9 @@ abstract class PartyRecord
         $counterpart = ContactRelations::counterpart(static::side());
 
         foreach ((array) ($record['relations'] ?? []) as $i => $relation) {
-            if ((int) ($relation[$counterpart] ?? 0) <= 0) {
+            $workEmail = strtolower(trim((string) ($relation['work_email'] ?? '')));
+
+            if ((int) ($relation[$counterpart] ?? 0) <= 0 || ($workEmail !== '' && !ContactPoints::emailFormat($workEmail))) {
                 $errors['relations.'.$i] = 'invalid';
             }
         }
@@ -184,6 +199,9 @@ abstract class PartyRecord
                 'is_primary' => ($row['is_primary'] ?? 'false') === 'true',
                 'receives_documents' => ($row['receives_documents'] ?? 'false') === 'true',
                 'access' => ContactRelations::access($row['access'] ?? null),
+                'work_email' => (string) ($row['work_email'] ?? ''),
+                'work_phone_prefix' => (string) ($row['work_phone_prefix'] ?? ''),
+                'work_phone' => (string) ($row['work_phone'] ?? ''),
             ];
         }
 
@@ -191,24 +209,48 @@ abstract class PartyRecord
     }
 
     /**
-     * Le email o i telefoni in più: valore, etichetta e, per i telefoni, prefisso.
+     * Le email o i telefoni (`ContactPoints::all()`): valore, etichetta,
+     * principale e, per i telefoni, prefisso; per le aziende le aree
+     * (`departments`, vuota = tutto).
      *
-     * @param list<array{kind: string, value: string, phone_prefix: string, label: string}> $points
-     * @return list<array<string, string>>
+     * @param list<array<string, mixed>> $points
+     * @return list<array<string, mixed>>
      */
     private static function points(array $points, string $kind): array
     {
         $out = [];
 
         foreach ($points as $point) {
-            if ($point['kind'] === $kind) {
-                $out[] = $kind === ContactPoints::PHONE
-                    ? ['phone_prefix' => $point['phone_prefix'], 'value' => $point['value'], 'label' => $point['label']]
-                    : ['value' => $point['value'], 'label' => $point['label']];
+            if ($point['kind'] !== $kind) {
+                continue;
             }
+
+            $item = $kind === ContactPoints::PHONE
+                ? ['phone_prefix' => $point['phone_prefix'], 'value' => $point['value'], 'label' => $point['label']]
+                : ['value' => $point['value'], 'label' => $point['label']];
+            $item['is_primary'] = (bool) $point['is_primary'];
+
+            if (static::entity() === ContactPoints::COMPANY) {
+                $item['departments'] = $point['departments'];
+            }
+
+            $out[] = $item;
         }
 
         return $out;
+    }
+
+    /**
+     * Place ID e coordinate della fatturazione: null se mancano. Arrivano dal
+     * browser: per mappe e distanze, mai per decidere qualcosa.
+     *
+     * @return array{place_id: string|null, lat: float|null, lng: float|null}
+     */
+    private static function geo(array $row): array
+    {
+        $geo = GoogleMaps::cleanGeo($row);
+
+        return ['place_id' => $geo['place_id'], 'lat' => $geo['lat'], 'lng' => $geo['lng']];
     }
 
     /** @return list<array<string, string>> */
