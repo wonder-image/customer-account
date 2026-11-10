@@ -72,11 +72,16 @@ trait HasContactRelations
             RepeaterColumn::key('id')->hidden(),
             static::withRelationQuickCreate(
                 RepeaterColumn::key(ContactRelations::PERSON)
-                    ->selectSearch(['' => '—'] + static::relationOptions(ContactRelations::COMPANY))
+                    ->selectSearch(['' => static::relationText('new_person')] + static::relationOptions(ContactRelations::COMPANY))
                     ->label(static::relationText('person'))
                     ->columnSpan(6),
                 ContactRelations::COMPANY
             ),
+            // Con il select vuoto la riga crea la persona: nome e cognome qui, email da quella di lavoro.
+            RepeaterColumn::key('new_name')->text()->label(static::relationText('new_person_name'))->columnSpan(3)
+                ->visibleWhen(ContactRelations::PERSON, ''),
+            RepeaterColumn::key('new_surname')->text()->label(static::relationText('new_surname'))->columnSpan(3)
+                ->visibleWhen(ContactRelations::PERSON, ''),
             RepeaterColumn::key('job_title')->text()->label(static::relationText('job_title'))->columnSpan(3),
             static::departmentsColumn(),
             ...static::workContactColumns(),
@@ -91,7 +96,7 @@ trait HasContactRelations
             RepeaterColumn::key('id')->hidden(),
             static::withRelationQuickCreate(
                 RepeaterColumn::key(ContactRelations::COMPANY)
-                    ->selectSearch(['' => '—'] + static::relationOptions(ContactRelations::PERSON))
+                    ->selectSearch(['' => (string) __t('contacts.option_none_f')] + static::relationOptions(ContactRelations::PERSON))
                     ->label(static::relationText('company'))
                     ->columnSpan(6),
                 ContactRelations::PERSON

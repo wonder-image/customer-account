@@ -4,6 +4,11 @@
 
 ### Changed
 
+- Brand: i colori hanno un nome. `colors` si salva come lista di `{color, name}`; `BrandData::palette()` li rilegge e accetta anche la lista di soli esadecimali di prima (nome vuoto).
+- Brand: l'etichetta dei recapiti del brand è una tendina con le etichette di `ContactPoints::labels()`; un'etichetta libera salvata prima diventa vuota.
+- Form del brand: la testata è come quella del marchio del catalogo, logo a sinistra e accanto nome, brand principale, sito e «Archiviato».
+- Referenti: con la tendina della persona vuota, la riga mostra «Nome» e «Cognome» (`new_name`, `new_surname`) e crea la persona al salvataggio; `ContactRelations::createPerson()` usa l'email di lavoro della riga quando la persona non ne ha una sua.
+- Niente trattini come testo visibile: le opzioni vuote delle tendine dicono «Nessuno» / «Nessuna» (`contacts.option_none`, `option_none_f`), i valori mancanti del pannello «Non indicato» (`account.overview.not_set`).
 - Richiede wonder-image/app `^2.4.0-beta.6`: la ricerca dell'indirizzo per nome dell'attività usa `AddressExtension::withNameSearch()`.
 - Richiede wonder-image/app `^2.4.0-beta.7` per `repeaterMinRows()` (almeno un contatto nel riquadro «Contatti»).
 

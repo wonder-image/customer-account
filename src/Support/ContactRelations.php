@@ -733,8 +733,9 @@ final class ContactRelations
      * Crea al volo la persona di una riga dei referenti, se la riga non ne
      * sceglie una ma ne scrive nome o cognome. Torna la riga con `person_id`.
      *
-     * Una persona creata così è solo un referente: non è cliente
-     * (`is_customer` falso) e non ha un accesso.
+     * Una persona creata così non ha un accesso ed è solo un referente
+     * (`is_customer` falso), salvo che `$payload` dica altro. Senza
+     * `new_email` prende l'email di lavoro della riga (`email`).
      *
      * @param array<string, mixed> $row
      * @param callable(array<string, mixed>): array<string, mixed>|null $payload ritocca i valori della scheda
@@ -756,6 +757,11 @@ final class ContactRelations
             'surname' => $surname,
         ];
         $email = is_scalar($row['new_email'] ?? null) ? trim((string) $row['new_email']) : '';
+
+        // Senza un'email sua, la persona prende l'email di lavoro della riga.
+        if ($email === '' && is_scalar($row['email'] ?? null)) {
+            $email = strtolower(trim((string) $row['email']));
+        }
 
         // L'email è facoltativa: vuota non si manda, altrimenti la validazione la scarta.
         if ($email !== '') {

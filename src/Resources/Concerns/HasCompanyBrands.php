@@ -45,7 +45,7 @@ trait HasCompanyBrands
             FormField::key(static::$brandsInput)
                 ->repeater([
                     RepeaterColumn::key('brand_id')
-                        ->selectSearch(['' => '—'] + CompanyBrands::options())
+                        ->selectSearch(['' => (string) __t('contacts.option_none')] + CompanyBrands::options())
                         ->quickCreate(static::brandResource(), ['name'], null, 'name', (string) __t('contacts.brand_add'))
                         ->label((string) __t('contacts.brand'))
                         ->columnSpan(6),

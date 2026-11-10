@@ -64,7 +64,7 @@ class CustomerAccountExtension extends BaseAccountExtension
         if ($contactId <= 0) {
             return $rows;
         }
-        $value = static fn (string $text): string => trim($text) !== '' ? trim($text) : '—';
+        $value = static fn (string $text): string => trim($text) !== '' ? trim($text) : (string) __t('account.overview.not_set');
         $own = [];
 
         if ($panel->enabled('billing') && self::rowIndex($rows, 'personal') !== null) {
@@ -92,7 +92,7 @@ class CustomerAccountExtension extends BaseAccountExtension
         if ($at !== null) {
             $birth = (string) ($contact['birth_date'] ?? '');
             $columns = (array) ($rows[$at]['columns'] ?? []);
-            array_splice($columns, 1, 0, [['label' => (string) __t('account.personal.birth_date'), 'value' => $birth !== '' ? date('d/m/Y', strtotime($birth)) : '—']]);
+            array_splice($columns, 1, 0, [['label' => (string) __t('account.personal.birth_date'), 'value' => $birth !== '' ? date('d/m/Y', strtotime($birth)) : (string) __t('account.overview.not_set')]]);
             $rows[$at]['columns'] = $columns;
         }
         if ($this->billing($contact)) {

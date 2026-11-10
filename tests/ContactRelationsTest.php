@@ -95,6 +95,23 @@ check('accessOf e companiesOf filtrano per accesso', function () use ($tables) {
         && count(ContactRelations::companiesOf(2)) === 2;
 });
 
+check('createPerson: senza email sua prende quella di lavoro della riga; i campi stanno solo lato azienda', function () use ($tables) {
+    Query::reset($tables());
+    $row = ContactRelations::createPerson(['person_id' => '', 'new_name' => 'Marta', 'email' => ' Marta@Rossi.test ']);
+    $own = ContactRelations::createPerson(['person_id' => '', 'new_name' => 'Lia', 'new_email' => 'lia@example.test', 'email' => 'ufficio@rossi.test']);
+    $names = static fn (string $resource, string $input) => array_map(
+        static fn ($c) => $c->name,
+        (array) $resource::formFieldsByKey()[$input]->get('context')['columns']
+    );
+    $people = $names(CompanyResource::class, CompanyResource::RELATION_PEOPLE);
+    $companies = $names(ContactResource::class, ContactResource::RELATION_COMPANIES);
+
+    return (Query::$tables['contacts'][$row['person_id']]['email'] ?? '') === 'marta@rossi.test'
+        && (Query::$tables['contacts'][$own['person_id']]['email'] ?? '') === 'lia@example.test'
+        && array_slice($people, array_search(ContactRelations::PERSON, $people, true) + 1, 2) === ['new_name', 'new_surname']
+        && !in_array('new_name', $companies, true);
+});
+
 check('spenti dai test: nessun campo in più nel form', function () {
     ContactRelations::useEnabled(false);
     $keys = array_map(static fn ($input) => $input->get('key') ?? $input->get('name'), ContactResource::formSchema());

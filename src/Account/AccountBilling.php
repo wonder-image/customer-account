@@ -72,7 +72,7 @@ final class AccountBilling
             trim($text('cap').' '.$text('city').' '.$text('province')),
             $text('country'),
         ]));
-        $value = static fn (string $text): string => $text !== '' ? $text : '—';
+        $value = static fn (string $text): string => $text !== '' ? $text : (string) __t('account.overview.not_set');
 
         return [
             ['key' => 'billing', 'columns' => [

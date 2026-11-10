@@ -288,19 +288,41 @@ final class BrandData
     /**
      * I colori del brand: esadecimali come `#1a2b3c` (anche `#abc`, che
      * diventa `#aabbcc`), da una lista o da un testo separato da virgole.
-     * Null se uno non va o sono troppi.
+     * Null se uno non va o sono troppi. Con il nome: `palette()`.
      *
      * @return list<string>|null
      */
     public static function colors(mixed $value): ?array
     {
+        $palette = self::palette($value);
+
+        return $palette === null ? null : array_column($palette, 'color');
+    }
+
+    /**
+     * I colori con il loro nome («Rosso Piana»), nell'ordine scelto. Valgono
+     * le righe del repeater (`color` + `name`), una lista di esadecimali (la
+     * forma di prima, senza nome) o un testo separato da virgole. Un colore
+     * ripetuto si tiene una volta, con il primo nome. Null se un colore o un
+     * nome non vanno o sono troppi.
+     *
+     * @return list<array{color: string, name: string}>|null
+     */
+    public static function palette(mixed $value): ?array
+    {
         $items = is_array($value) ? $value : preg_split('/[\s,;]+/', is_scalar($value) ? (string) $value : '');
         $out = [];
 
         foreach ((array) $items as $item) {
-            // Una riga del repeater dei colori: `['color' => '#1a2b3c']`.
-            if (is_array($item) && array_key_exists('color', $item)) {
-                $item = $item['color'];
+            $name = '';
+
+            if (is_array($item)) {
+                $name = self::text($item['name'] ?? '', 60);
+                $item = $item['color'] ?? '';
+
+                if ($name === null) {
+                    return null;
+                }
             }
 
             $item = is_scalar($item) ? strtolower(trim((string) $item)) : null;
@@ -313,10 +335,10 @@ final class BrandData
                 return null;
             }
 
-            $hex = strlen($match[1]) === 3 ? preg_replace('/(.)/', '$1$1', $match[1]) : $match[1];
+            $hex = '#'.(strlen($match[1]) === 3 ? preg_replace('/(.)/', '$1$1', $match[1]) : $match[1]);
 
-            if (!in_array('#'.$hex, $out, true)) {
-                $out[] = '#'.$hex;
+            if (!in_array($hex, array_column($out, 'color'), true)) {
+                $out[] = ['color' => $hex, 'name' => $name];
             }
         }
 
@@ -383,7 +405,7 @@ final class BrandData
 
     /**
      * I recapiti del brand: righe `kind` (`email` / `phone`), `email` oppure
-     * `phone_prefix` + `phone`, `label` facoltativa. Le righe vuote si
+     * `phone_prefix` + `phone`, `label` facoltativa (una di `ContactPoints::labels()`). Le righe vuote si
      * saltano, i doppioni pure. Null se una riga non va o sono troppe.
      *
      * @return list<array{kind: string, email?: string, phone_prefix?: string, phone?: string, label: string}>|null
@@ -399,11 +421,8 @@ final class BrandData
             }
 
             $kind = is_scalar($row['kind'] ?? null) ? (string) $row['kind'] : '';
-            $label = self::text($row['label'] ?? '', 60);
-
-            if ($label === null) {
-                return null;
-            }
+            // Solo le etichette preimpostate: una scritta a mano di prima diventa vuota.
+            $label = ContactPoints::label($row['label'] ?? '');
 
             if ($kind === ContactPoints::PHONE) {
                 $phone = ContactPoints::phoneNumber($row['phone'] ?? '');
@@ -503,7 +522,7 @@ final class BrandData
                 'email' => self::email($raw),
                 'phone_prefix' => ContactPoints::phonePrefix($raw),
                 'phone' => ContactPoints::phoneNumber($raw),
-                'colors' => self::json(self::colors($raw)),
+                'colors' => self::json(self::palette($raw)),
                 'socials' => self::json(self::socialLinks($raw)),
                 'language' => self::language($raw),
                 'sector' => self::sector($raw),
@@ -556,8 +575,9 @@ final class BrandData
 
     /**
      * I dati di un brand letti dalla riga, nella forma dei record: testi,
-     * `socials` come mappa e `colors` come lista. Il logo è il percorso del
-     * file sotto la cartella dei caricamenti (`CompanyBrand::logoPath()`).
+     * `socials` come mappa, `colors` come lista di esadecimali e `palette` con
+     * i nomi dei colori. Il logo è il percorso del file sotto la cartella dei
+     * caricamenti (`CompanyBrand::logoPath()`).
      *
      * @return array<string, mixed>
      */
@@ -580,6 +600,7 @@ final class BrandData
             // Si rileggono con le regole: un valore scritto a mano nel database non passa.
             'socials' => self::socialLinks(is_array($socials) ? $socials : []) ?? [],
             'colors' => self::colors(is_array($colors) ? $colors : []) ?? [],
+            'palette' => self::palette(is_array($colors) ? $colors : []) ?? [],
             'tone' => self::decoded($brand['tone'] ?? ''),
             'sector' => self::decoded($brand['sector'] ?? ''),
             'language' => (string) ($brand['language'] ?? ''),
