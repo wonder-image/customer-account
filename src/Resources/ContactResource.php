@@ -15,7 +15,9 @@ use Wonder\Elements\Form\Form;
 use Wonder\Http\Csrf;
 
 /**
- * La rubrica delle persone, senza campi commerciali né credenziali.
+ * La rubrica delle persone, senza campi commerciali né credenziali. Email e
+ * telefono principali sono campi della scheda; quelli in più stanno nel
+ * repeater «Altri contatti» (`HasContactPoints`).
  * `CompanyResource` la estende per le aziende: i punti che cambiano sono
  * `requiredKeys()`, `exportFields()`, `addressesPath()` e gli eventi.
  */
@@ -47,6 +49,7 @@ class ContactResource extends Resource
             ...array_values($fields),
             ...static::extraFormFields(),
             FormField::key('email')->email(),
+            ...static::contactPointFields(),
             FormField::key('note')->textarea(),
             FormField::key('active')->select(['true' => (string) __t('contacts.enabled'), 'false' => (string) __t('contacts.disabled')])->value('true')->required(),
             ...static::contactRelationFields(),
@@ -133,6 +136,8 @@ class ContactResource extends Resource
     public static function mutateRequestValues(array $values, string $action, string $context = 'backend', ?array $oldValues = null): array
     {
         static::verifyFormToken($values);
+        // I recapiti in più non sono colonne: si controllano qui e li scrive `syncRepeaterRelations()`.
+        static::assertContactPoints($values, $oldValues);
         $values = array_intersect_key($values, static::labelSchema());
         foreach ($values as $key => $value) {
             if (!is_scalar($value) && $value !== null) { throw new InvalidArgumentException((string) __t('contacts.field_invalid', ['field' => static::labelSchema()[$key]])); }

@@ -313,10 +313,13 @@ check('CompanyRecord: i brand legati con codice, slug, ruolo, predefinito e bran
     $record = CompanyRecord::from(1);
     $parent = CompanyRecord::from(2);
 
-    return $record['schema'] === 3 && $record['brands'] === [
+    $base = array_flip(['id', 'code', 'slug', 'name', 'role', 'is_default', 'parent_id', 'parent_code']);
+
+    return $record['schema'] === 4 && array_map(static fn (array $brand): array => array_intersect_key($brand, $base), $record['brands']) === [
         ['id' => 2, 'code' => 'cbr_la-piana', 'slug' => 'la-piana', 'name' => 'La Piana', 'role' => 'licensee', 'is_default' => false, 'parent_id' => 1, 'parent_code' => 'cbr_rclass'],
         ['id' => 1, 'code' => 'cbr_rclass', 'slug' => 'rclass', 'name' => 'RClass', 'role' => 'owner', 'is_default' => true, 'parent_id' => 0, 'parent_code' => ''],
-    ] && $record['parent_id'] === 2 && $record['parent_code'] === 'cmp_royal'
+    ] && $record['brands'][0]['website'] === '' && $record['brands'][0]['socials'] === [] && $record['brands'][0]['colors'] === []
+        && $record['parent_id'] === 2 && $record['parent_code'] === 'cmp_royal'
         && $parent['parent_id'] === 0 && $parent['parent_code'] === '' && json_encode($record) !== false;
 });
 

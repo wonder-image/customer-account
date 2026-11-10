@@ -66,6 +66,8 @@ namespace Wonder\Sql {
         /** @var array<int, array{table: string, condition: mixed, limit: mixed, columns: string}> letture eseguite */
         public static array $selects = [];
         public static bool $failWrites = false;
+        /** Una lettura che fallisce come la `Query` vera: `success` falso e nessuna riga. */
+        public static bool $failReads = false;
         /** @var (callable(string, array): void)|null chiamata prima di ogni Insert: può lanciare, come un indice univoco violato */
         public static $beforeInsert = null;
 
@@ -77,6 +79,7 @@ namespace Wonder\Sql {
             self::$writes = [];
             self::$selects = [];
             self::$failWrites = false;
+            self::$failReads = false;
             self::$beforeInsert = null;
             \Wonder\App\Support\RequestMemo::reset();
         }
@@ -132,6 +135,9 @@ namespace Wonder\Sql {
         {
             $attributes = is_array($attributes) ? implode(',', $attributes) : $attributes;
             self::$selects[] = ['table' => (string) $table, 'condition' => $condition, 'limit' => $limit, 'columns' => $attributes];
+            if (self::$failReads) {
+                return (object) ['success' => false, 'row' => []];
+            }
             $rows = array_values($this->matching((string) $table, $condition));
 
             if (preg_match('/^\s*MAX\(`?(\w+)`?\)\s+AS\s+`?(\w+)`?\s*$/i', $attributes, $m) === 1) {

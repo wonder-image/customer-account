@@ -10,14 +10,16 @@ use Wonder\App\Models\System\ExternalReference;
  * una scheda per export, import e sync verso un CRM o un sistema di newsletter.
  *
  * `from()` legge la scheda e la porta in un array serializzabile (versione in
- * `schema`): i campi della scheda, i legami azienda/persona visti dal suo
- * lato, gli id esterni di `external_references`. `fromArray()` e `validate()`
+ * `schema`): i campi della scheda, i recapiti in più (`emails`, `phones`:
+ * `email` resta quella principale), i legami azienda/persona visti dal suo
+ * lato con le aree del referente, gli id esterni di `external_references`. `fromArray()` e `validate()`
  * fanno il viaggio inverso per un import. Nessuna scrittura qui: i legami si
  * salvano con `ContactRelations::sync()`.
  */
 abstract class PartyRecord
 {
-    public const SCHEMA = 2;
+    /** 3: i legami portano `departments` (le aree), la scheda `emails` e `phones` (i recapiti in più). */
+    public const SCHEMA = 3;
 
     /** L'entità in `external_references` (`contact`, `company`). */
     abstract public static function entity(): string;
@@ -58,6 +60,9 @@ abstract class PartyRecord
 
         $record['is_customer'] = ($row['is_customer'] ?? 'true') === 'true';
         $record['active'] = ($row['active'] ?? 'true') === 'true';
+        $points = ContactPoints::of(static::entity(), $id);
+        $record['emails'] = self::points($points, ContactPoints::EMAIL);
+        $record['phones'] = self::points($points, ContactPoints::PHONE);
         $record['relations'] = self::relations($id);
         $record['external_ids'] = self::externalIds($id);
 
@@ -91,7 +96,7 @@ abstract class PartyRecord
             }
         }
 
-        foreach (['relations', 'external_ids'] as $key) {
+        foreach (['emails', 'phones', 'relations', 'external_ids'] as $key) {
             if (isset($input[$key]) && is_array($input[$key])) {
                 $out[$key] = array_values(array_filter($input[$key], 'is_array'));
             }
@@ -114,6 +119,18 @@ abstract class PartyRecord
             $value = (string) ($record[$field] ?? '');
             if ($value !== '' && filter_var($value, FILTER_VALIDATE_EMAIL) === false) {
                 $errors[$field] = 'invalid';
+            }
+        }
+
+        foreach ((array) ($record['emails'] ?? []) as $i => $point) {
+            if (filter_var(strtolower(trim((string) ($point['value'] ?? ''))), FILTER_VALIDATE_EMAIL) === false) {
+                $errors['emails.'.$i] = 'invalid';
+            }
+        }
+
+        foreach ((array) ($record['phones'] ?? []) as $i => $point) {
+            if (preg_match('/^\d{4,20}$/', (string) preg_replace('/[\s\-.\/()]+/', '', (string) ($point['value'] ?? ''))) !== 1) {
+                $errors['phones.'.$i] = 'invalid';
             }
         }
 
@@ -162,11 +179,33 @@ abstract class PartyRecord
             $out[] = [
                 $other => (int) ($row[$other] ?? 0),
                 'job_title' => (string) ($row['job_title'] ?? ''),
-                'department' => ContactRelations::department($row['department'] ?? ''),
+                'department' => (string) ($row['department'] ?? ''),
+                'departments' => $row['departments'] ?? [],
                 'is_primary' => ($row['is_primary'] ?? 'false') === 'true',
                 'receives_documents' => ($row['receives_documents'] ?? 'false') === 'true',
                 'access' => ContactRelations::access($row['access'] ?? null),
             ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Le email o i telefoni in più: valore, etichetta e, per i telefoni, prefisso.
+     *
+     * @param list<array{kind: string, value: string, phone_prefix: string, label: string}> $points
+     * @return list<array<string, string>>
+     */
+    private static function points(array $points, string $kind): array
+    {
+        $out = [];
+
+        foreach ($points as $point) {
+            if ($point['kind'] === $kind) {
+                $out[] = $kind === ContactPoints::PHONE
+                    ? ['phone_prefix' => $point['phone_prefix'], 'value' => $point['value'], 'label' => $point['label']]
+                    : ['value' => $point['value'], 'label' => $point['label']];
+            }
         }
 
         return $out;

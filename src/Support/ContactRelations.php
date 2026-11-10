@@ -8,6 +8,8 @@ use Wonder\Plugin\CustomerAccount\Models\Company;
 use Wonder\Plugin\CustomerAccount\Models\Contact;
 use Wonder\Plugin\CustomerAccount\Models\ContactRelation;
 use Wonder\Plugin\CustomerAccount\Models\ContactRelationBrand;
+use Wonder\Plugin\CustomerAccount\Models\ContactRelationDepartment;
+use Wonder\Sql\Transaction;
 
 /**
  * I legami fra aziende (`companies`) e persone (`contacts`), in `contact_relations`.
@@ -19,6 +21,10 @@ use Wonder\Plugin\CustomerAccount\Models\ContactRelationBrand;
  * Un referente può seguire solo alcuni brand dell'azienda
  * (`contact_relation_brands`); senza righe li segue tutti. Contano solo i
  * brand ancora legati all'azienda: se non ne resta nessuno, li segue tutti.
+ *
+ * Allo stesso modo un referente si occupa di una o più aree
+ * (`contact_relation_departments`): senza righe si occupa di tutto. Chi deve
+ * scegliere a chi mandare un documento parte da `peopleFor()`.
  */
 final class ContactRelations
 {
@@ -27,8 +33,70 @@ final class ContactRelations
 
     private static ?bool $override = null;
 
-    /** @var array<string, string> reparti aggiunti da moduli e siti: chiave => etichetta */
+    /** @var array<string, string> aree aggiunte da moduli e siti: chiave => etichetta */
     private static array $extraDepartments = [];
+
+    /** @var null|callable(string, list<int>): list<int> */
+    private static $counterpartFilter = null;
+
+    /** @var null|callable(int, int, string): bool */
+    private static $accessGuard = null;
+
+    /**
+     * Restringe le schede che si possono legare, per chi ha una visibilità per
+     * riga (il commerciale vede solo le sue): `fn(string $modelClass, list<int>
+     * $ids): list<int>` dà gli id ammessi fra quelli dati. In scrittura una
+     * controparte non ammessa si scarta, ma una già legata resta (chi non la
+     * vede non la stacca salvando); in lettura le scelte del repeater sono le
+     * ammesse più quelle già legate. `null` (il default) = tutte.
+     */
+    public static function useCounterpartFilter(?callable $filter): void
+    {
+        self::$counterpartFilter = $filter;
+    }
+
+    /**
+     * Chi può alzare `access` (`none` → `buyer` → `admin`):
+     * `fn(int $companyId, int $personId, string $access): bool`. Se dice no,
+     * l'accesso resta quello già salvato (`none` per un legame nuovo);
+     * abbassarlo si può sempre. `null` (il default) = nessun controllo.
+     */
+    public static function useAccessGuard(?callable $guard): void
+    {
+        self::$accessGuard = $guard;
+    }
+
+    /**
+     * Gli id ammessi dal filtro delle controparti (`useCounterpartFilter()`),
+     * nell'ordine dato; senza filtro tutti.
+     *
+     * @param list<int> $ids
+     * @return list<int>
+     */
+    public static function allowedCounterparts(string $parentColumn, array $ids): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map([self::class, 'id'], $ids), static fn (int $id): bool => $id > 0)));
+
+        if (self::$counterpartFilter === null || $ids === []) {
+            return $ids;
+        }
+
+        $allowed = array_map([self::class, 'id'], (array) (self::$counterpartFilter)(self::counterpartModel($parentColumn), $ids));
+
+        return array_values(array_filter($ids, static fn (int $id): bool => in_array($id, $allowed, true)));
+    }
+
+    /**
+     * Gli id dell'altro lato legati oggi a una scheda.
+     *
+     * @return list<int>
+     */
+    public static function linkedIds(string $parentColumn, int $parentId): array
+    {
+        return $parentId > 0 && in_array($parentColumn, [self::COMPANY, self::PERSON], true)
+            ? array_values(array_filter(array_keys(self::liveByCounterpart($parentColumn, $parentId)), static fn (int $id): bool => $id > 0))
+            : [];
+    }
 
     public static function enabled(): bool
     {
@@ -63,8 +131,13 @@ final class ContactRelations
      * Toglie le righe senza controparte, le controparti che non esistono e i
      * doppioni (vince la prima). Una coppia che esiste già, anche cancellata,
      * riprende l'id della sua riga: così la chiave unica azienda/persona non
-     * salta e la riga torna viva. Al massimo un referente principale. Se la
-     * riga non porta `access` o `department`, resta quello di prima.
+     * salta e la riga torna viva. Dal lato azienda al massimo un referente
+     * principale (il primo); dal lato persona ogni riga è un'azienda diversa e
+     * tiene il suo `is_primary` (gli altri referenti di quell'azienda lo
+     * perdono in `sync()`). Se la riga non porta `access`, resta quello di
+     * prima; con un `useAccessGuard()` che dice no, l'accesso non sale oltre
+     * quello salvato (`none` per un legame nuovo). Le aree non sono colonne
+     * del legame: le scrive `sync()`. Un valore non scalare vale vuoto.
      *
      * @param list<array<string, mixed>> $posted
      * @param list<array<string, mixed>> $existing tutte le righe del padre, cancellate comprese
@@ -90,24 +163,39 @@ final class ContactRelations
         $primary = false;
 
         foreach ($posted as $row) {
-            $counterpartId = (int) ($row[$other] ?? 0);
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $counterpartId = self::id($row[$other] ?? 0);
 
             if ($counterpartId <= 0 || isset($seen[$counterpartId]) || !isset($valid[$counterpartId])) {
                 continue;
             }
 
             $seen[$counterpartId] = true;
+            $stored = $existingByCounterpart[$counterpartId] ?? null;
+            // Lo stato salvato conta solo per un legame vivo: uno cancellato che torna riparte da `none`.
+            $before = $stored !== null && ($stored['deleted'] ?? 'false') === 'false' ? self::access($stored['access'] ?? null) : ContactRelation::ACCESS_NONE;
+            $access = self::access($row['access'] ?? $stored['access'] ?? null);
+            $companyId = $parentColumn === self::COMPANY ? $parentId : $counterpartId;
+            $personId = $parentColumn === self::COMPANY ? $counterpartId : $parentId;
+
+            if (self::rank($access) > self::rank($before) && self::$accessGuard !== null && !(self::$accessGuard)($companyId, $personId, $access)) {
+                $access = $before;
+            }
+
             $clean = [
                 $other => $counterpartId,
-                'job_title' => trim((string) ($row['job_title'] ?? '')),
+                'job_title' => is_scalar($row['job_title'] ?? null) ? trim((string) $row['job_title']) : '',
                 'is_primary' => self::flag($row['is_primary'] ?? 'false'),
                 'receives_documents' => self::flag($row['receives_documents'] ?? 'false'),
-                'access' => self::access($row['access'] ?? $existingByCounterpart[$counterpartId]['access'] ?? null),
-                'department' => self::department($row['department'] ?? $existingByCounterpart[$counterpartId]['department'] ?? ''),
+                'access' => $access,
                 'deleted' => 'false',
             ];
 
-            if ($clean['is_primary'] === 'true') {
+            // Un solo principale per azienda: dal lato persona le righe sono aziende diverse.
+            if ($clean['is_primary'] === 'true' && $parentColumn === self::COMPANY) {
                 $clean['is_primary'] = $primary ? 'false' : 'true';
                 $primary = true;
             }
@@ -135,7 +223,8 @@ final class ContactRelations
     }
 
     /**
-     * I reparti del referente per un select: quelli di base e quelli aggiunti.
+     * Le aree di cui si occupa un referente, per un select: quelle di base e
+     * quelle aggiunte.
      *
      * @return array<string, string>
      */
@@ -151,7 +240,7 @@ final class ContactRelations
     }
 
     /**
-     * Aggiunge un reparto (es. `marketing`) per i select, le email e i sync.
+     * Aggiunge un'area (es. `marketing`) per i select, le email e i sync.
      * Un modulo lo chiama al boot, un sito in `custom/function`.
      */
     public static function addDepartment(string $key, string $label): void
@@ -163,24 +252,151 @@ final class ContactRelations
         }
     }
 
-    /** Un reparto valido, altrimenti vuoto (nessun reparto). */
+    /** Un'area valida, altrimenti vuoto. */
     public static function department(mixed $value): string
     {
-        $value = trim((string) $value);
+        $value = is_scalar($value) ? trim((string) $value) : '';
 
         return array_key_exists($value, self::departments()) ? $value : '';
     }
 
-    /** L'etichetta di un reparto; vuota se non c'è. */
+    /**
+     * Le aree valide di una lista (o di un valore solo), senza doppioni e
+     * nell'ordine dato: le altre si scartano.
+     *
+     * @return list<string>
+     */
+    public static function cleanDepartments(mixed $values): array
+    {
+        $out = [];
+
+        foreach (is_array($values) ? $values : [$values] as $value) {
+            $value = self::department($value);
+
+            if ($value !== '' && !in_array($value, $out, true)) {
+                $out[] = $value;
+            }
+        }
+
+        return $out;
+    }
+
+    /** L'etichetta di un'area; vuota se non c'è. */
     public static function departmentLabel(mixed $value): string
     {
         return self::departments()[self::department($value)] ?? '';
     }
 
     /**
-     * I referenti di un'azienda in uno o più reparti, con la scheda sotto
-     * `contact`: il punto da cui email, fatture e newsletter scelgono a chi
-     * scrivere (es. `administration` per le fatture).
+     * Le aree di cui si occupa un referente; vuota = tutte.
+     *
+     * @return list<string>
+     */
+    public static function departmentsOf(int $relationId): array
+    {
+        return self::departmentsByRelation([$relationId])[$relationId] ?? [];
+    }
+
+    /**
+     * Le aree di più legami, in una query. I legami che si occupano di tutto
+     * (senza righe) non compaiono.
+     *
+     * @param list<int> $relationIds
+     * @return array<int, list<string>>
+     */
+    public static function departmentsByRelation(array $relationIds): array
+    {
+        $relationIds = array_values(array_unique(array_filter(array_map('intval', $relationIds), static fn (int $id): bool => $id > 0)));
+        $out = [];
+
+        if ($relationIds === []) {
+            return $out;
+        }
+
+        foreach (self::rows(ContactRelationDepartment::find(['relation_id' => $relationIds], null, 'id', 'ASC')) as $row) {
+            $out[(int) $row['relation_id']][] = (string) $row['department'];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Scrive le aree di un referente: quelle sconosciute si scartano, una
+     * lista vuota = si occupa di tutto.
+     *
+     * @param list<string>|string $departments
+     * @return list<string> le aree rimaste
+     */
+    public static function setDepartments(int $relationId, array|string $departments): array
+    {
+        $relation = $relationId > 0 ? ContactRelation::findById($relationId) : null;
+
+        if (!is_array($relation) || !isset($relation['id']) || ($relation['deleted'] ?? 'false') !== 'false') {
+            return [];
+        }
+
+        return Transaction::run(static fn (): array => self::writeDepartments($relationId, self::cleanDepartments($departments)));
+    }
+
+    /**
+     * Le righe di un repeater dei legami con `departments`, per mostrarle nel
+     * form: la colonna non è di `contact_relations`.
+     *
+     * @param list<array<string, mixed>> $rows
+     * @return list<array<string, mixed>>
+     */
+    public static function withDepartments(array $rows): array
+    {
+        $ids = [];
+
+        foreach ($rows as $row) {
+            if (is_array($row) && !array_key_exists('departments', $row) && (int) ($row['id'] ?? 0) > 0) {
+                $ids[] = (int) $row['id'];
+            }
+        }
+
+        $areas = self::departmentsByRelation($ids);
+
+        foreach ($rows as $key => $row) {
+            if (is_array($row) && !array_key_exists('departments', $row)) {
+                $rows[$key]['departments'] = $areas[(int) ($row['id'] ?? 0)] ?? [];
+            }
+        }
+
+        return $rows;
+    }
+
+    /**
+     * A chi scrivere per un'area e un brand: i referenti vivi che si occupano
+     * di quell'area o di tutte e seguono quel brand o tutti, con la scheda
+     * sotto `contact`; il principale per primo, poi nell'ordine scelto. È il
+     * punto unico da cui i moduli scelgono i destinatari di un documento
+     * (`receives_documents` è nella riga: lo filtra chi manda documenti).
+     * Area vuota = qualunque area; brand 0 = qualunque brand.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public static function peopleFor(int $companyId, string $department = '', int $brandId = 0): array
+    {
+        $rows = self::peopleOf($companyId, $brandId);
+        $department = trim($department);
+
+        if ($department !== '') {
+            $rows = array_values(array_filter(
+                $rows,
+                static fn (array $row): bool => $row['departments'] === [] || in_array($department, $row['departments'], true)
+            ));
+        }
+
+        // usort è stabile: fra i non principali resta l'ordine del repeater.
+        usort($rows, static fn (array $a, array $b): int => (($b['is_primary'] ?? 'false') === 'true') <=> (($a['is_primary'] ?? 'false') === 'true'));
+
+        return $rows;
+    }
+
+    /**
+     * I referenti di un'azienda che si occupano di almeno una di queste aree
+     * o di tutte (nessuna area), con la scheda sotto `contact`.
      *
      * @param string|list<string> $departments
      * @return list<array<string, mixed>>
@@ -191,7 +407,7 @@ final class ContactRelations
 
         return array_values(array_filter(
             self::peopleOf($companyId),
-            static fn (array $row): bool => in_array((string) ($row['department'] ?? ''), $wanted, true)
+            static fn (array $row): bool => $row['departments'] === [] || array_intersect($wanted, $row['departments']) !== []
         ));
     }
 
@@ -210,7 +426,8 @@ final class ContactRelations
 
     /**
      * I referenti di un'azienda, in ordine: ogni riga del legame con la
-     * scheda della persona sotto `contact`.
+     * scheda della persona sotto `contact` e le aree in `departments`
+     * (vuota = tutte; `department` è la prima, per chi leggeva il reparto).
      *
      * @param int $brandId se c'è, solo chi segue quel brand o tutti i brand
      * @return list<array<string, mixed>>
@@ -389,17 +606,18 @@ final class ContactRelations
     }
 
     /**
-     * Quali fra gli id indicati esistono dall'altro lato del legame.
+     * Quali fra gli id indicati esistono dall'altro lato del legame e, con un
+     * filtro (`useCounterpartFilter()`), sono ammessi o già legati a `$parentId`.
      *
      * @param list<int> $ids
      * @return list<int>
      */
-    public static function existingCounterparts(string $parentColumn, array $ids): array
+    public static function existingCounterparts(string $parentColumn, array $ids, int $parentId = 0): array
     {
         $model = self::counterpartModel($parentColumn);
         $out = [];
 
-        foreach (array_unique(array_filter(array_map('intval', $ids))) as $id) {
+        foreach (array_unique(array_filter(array_map([self::class, 'id'], $ids))) as $id) {
             $row = $model::findById($id);
 
             if (is_array($row) && isset($row['id'])) {
@@ -407,7 +625,83 @@ final class ContactRelations
             }
         }
 
-        return $out;
+        if (self::$counterpartFilter === null || $out === []) {
+            return $out;
+        }
+
+        $keep = [...self::allowedCounterparts($parentColumn, $out), ...self::linkedIds($parentColumn, $parentId)];
+
+        return array_values(array_filter($out, static fn (int $id): bool => in_array($id, $keep, true)));
+    }
+
+    /**
+     * Crea, o riapre, il solo legame fra un'azienda e una persona, senza
+     * ripassare né toccare gli altri legami dell'una o dell'altra (la
+     * creazione rapida). `$values` come una riga di `sync()` (`job_title`,
+     * `is_primary`, `receives_documents`, `access`, `departments`, `brand_ids`);
+     * `access` è `none` se non c'è, e passa da `useAccessGuard()`. Un legame
+     * già vivo non cambia: per modificarlo c'è `sync()`. Stessa transazione e
+     * stessi eventi di `sync()` (`contact.linked` dopo il commit). Non applica
+     * il filtro delle controparti: chi chiama sa già che le due schede si vedono.
+     *
+     * @param array<string, mixed> $values
+     * @return bool il legame è vivo
+     */
+    public static function attach(int $companyId, int $personId, array $values = []): bool
+    {
+        $company = $companyId > 0 ? Company::findById($companyId) : null;
+        $person = $personId > 0 ? Contact::findById($personId) : null;
+
+        if (!is_array($company) || !isset($company['id']) || !is_array($person) || !isset($person['id'])) {
+            return false;
+        }
+
+        if (self::isLinked($personId, $companyId)) {
+            return true;
+        }
+
+        $values = [self::PERSON => $personId, 'access' => ContactRelation::ACCESS_NONE] + array_diff_key($values, [self::COMPANY => true, self::PERSON => true, 'id' => true]);
+
+        $event = Transaction::run(static function () use ($companyId, $personId, $values): array {
+            $existing = self::rows(ContactRelation::find([self::COMPANY => $companyId, self::PERSON => $personId, 'deleted' => ['true', 'false']]));
+            $clean = self::normalize([$values], $existing, self::COMPANY, $companyId, [$personId])[0];
+            $id = (int) ($clean['id'] ?? 0);
+            unset($clean['id']);
+            $clean[self::COMPANY] = $companyId;
+
+            if ($id > 0) {
+                $result = ContactRelation::query()->Update(ContactRelation::$table, $clean, 'id', $id);
+            } else {
+                $max = ContactRelation::query()->Select(ContactRelation::$table, [self::COMPANY => $companyId], 1, null, null, 'MAX(position) AS pos')->row ?? [];
+                $clean['position'] = (int) ($max['pos'] ?? 0) + 1;
+                $result = ContactRelation::create($clean);
+                $id = (int) ($result->insert_id ?? 0);
+            }
+
+            if (!($result->success ?? false) || $id <= 0) {
+                throw new \RuntimeException('Legame azienda/persona non salvato.');
+            }
+
+            if ($clean['is_primary'] === 'true') {
+                self::demoteOtherPrimaries($companyId, $personId);
+            }
+
+            if (array_key_exists('departments', $values) || array_key_exists('department', $values)) {
+                self::writeDepartments($id, self::cleanDepartments($values['departments'] ?? $values['department'] ?? []));
+            }
+
+            $relation = ContactRelation::findById($id);
+
+            if (array_key_exists('brand_ids', $values) && is_array($relation)) {
+                self::writeBrands($relation, is_array($values['brand_ids']) ? $values['brand_ids'] : [$values['brand_ids']], CompanyBrands::openIdsByCompany([$companyId])[$companyId] ?? []);
+            }
+
+            return self::eventPayload(is_array($relation) ? $relation : ['id' => $id] + $clean);
+        });
+
+        ContactEvents::dispatch(ContactEvents::LINKED, $event);
+
+        return true;
     }
 
     /**
@@ -423,8 +717,8 @@ final class ContactRelations
      */
     public static function createPerson(array $row, ?callable $payload = null): array
     {
-        $name = trim((string) ($row['new_name'] ?? ''));
-        $surname = trim((string) ($row['new_surname'] ?? ''));
+        $name = is_scalar($row['new_name'] ?? null) ? trim((string) $row['new_name']) : '';
+        $surname = is_scalar($row['new_surname'] ?? null) ? trim((string) $row['new_surname']) : '';
 
         if ((int) ($row[self::PERSON] ?? 0) > 0 || ($name === '' && $surname === '')) {
             return $row;
@@ -436,7 +730,7 @@ final class ContactRelations
             'name' => $name,
             'surname' => $surname,
         ];
-        $email = trim((string) ($row['new_email'] ?? ''));
+        $email = is_scalar($row['new_email'] ?? null) ? trim((string) $row['new_email']) : '';
 
         // L'email è facoltativa: vuota non si manda, altrimenti la validazione la scarta.
         if ($email !== '') {
@@ -461,10 +755,13 @@ final class ContactRelations
      * passano da qui.
      *
      * `$rows` sono le righe grezze dell'altro lato (`person_id` o `company_id`,
-     * `job_title`, `department`, `is_primary`, `receives_documents`, `access`, `brand_ids`; dal lato azienda anche
+     * `job_title`, `departments`, `is_primary`, `receives_documents`, `access`, `brand_ids`; dal lato azienda anche
      * `new_name`, `new_surname`, `new_email` per creare la persona). Le righe non
-     * presenti si cancellano (soft delete). Emette `ContactEvents::LINKED` e
-     * `UNLINKED` per le coppie che cambiano, `CREATED` per le persone nuove.
+     * presenti si cancellano (soft delete). Una riga senza `departments` (o
+     * senza il vecchio `department`) tiene le aree di prima, come `brand_ids`.
+     * I legami, i brand e le aree si scrivono in una transazione; gli eventi
+     * `ContactEvents::LINKED` e `UNLINKED` partono dopo il commit. `CREATED`
+     * parte per le persone nuove, create prima dei legami.
      *
      * @param list<array<string, mixed>> $rows
      * @param callable(array<string, mixed>): array<string, mixed>|null $payload ritocca la persona creata
@@ -477,24 +774,56 @@ final class ContactRelations
         }
 
         $other = self::counterpart($parentColumn);
+        $rows = array_values(array_filter($rows, 'is_array'));
 
         if ($parentColumn === self::COMPANY) {
             $rows = array_map(static fn (array $row): array => self::createPerson($row, $payload), $rows);
         }
 
-        // I brand seguiti non sono colonne del legame: si scrivono dopo, solo per le righe che li portano.
+        // Brand seguiti e aree non sono colonne del legame: si scrivono dopo, solo per le righe che li portano.
         $brands = [];
+        $areas = [];
 
         foreach ($rows as $row) {
-            $counterpartId = (int) ($row[$other] ?? 0);
+            $counterpartId = self::id($row[$other] ?? 0);
 
-            if ($counterpartId > 0 && !isset($brands[$counterpartId]) && array_key_exists('brand_ids', $row)) {
+            if ($counterpartId <= 0) {
+                continue;
+            }
+
+            if (!isset($brands[$counterpartId]) && array_key_exists('brand_ids', $row)) {
                 $brands[$counterpartId] = is_array($row['brand_ids']) ? $row['brand_ids'] : [$row['brand_ids']];
+            }
+
+            // `department` (un valore) è la forma di prima: vale ancora per un'API o un import vecchi.
+            if (!isset($areas[$counterpartId]) && (array_key_exists('departments', $row) || array_key_exists('department', $row))) {
+                $areas[$counterpartId] = self::cleanDepartments($row['departments'] ?? $row['department'] ?? []);
             }
         }
 
+        // Gli eventi partono dopo il commit: un ascoltatore non vede scritture poi annullate.
+        [$summary, $events] = Transaction::run(static fn (): array => self::writeRelations($parentColumn, $parentId, $rows, $brands, $areas));
+
+        foreach ($events as [$event, $payload]) {
+            ContactEvents::dispatch($event, $payload);
+        }
+
+        return $summary;
+    }
+
+    /**
+     * Le scritture di `sync()`, dentro la sua transazione.
+     *
+     * @param list<array<string, mixed>> $rows
+     * @param array<int, list<int|string>> $brands controparte => brand seguiti
+     * @param array<int, list<string>> $areas controparte => aree
+     * @return array{0: array<string, mixed>, 1: list<array{0: string, 1: array<string, mixed>}>} il riepilogo e gli eventi da emettere
+     */
+    private static function writeRelations(string $parentColumn, int $parentId, array $rows, array $brands, array $areas): array
+    {
+        $other = self::counterpart($parentColumn);
         $before = self::liveByCounterpart($parentColumn, $parentId);
-        $valid = self::existingCounterparts($parentColumn, array_map(static fn (array $row): int => (int) ($row[$other] ?? 0), $rows));
+        $valid = self::existingCounterparts($parentColumn, array_map(static fn (array $row): int => self::id($row[$other] ?? 0), $rows), $parentId);
         $clean = self::normalize($rows, self::allRowsOf($parentColumn, $parentId), $parentColumn, $parentId, $valid);
         $relation = RepeaterRelation::make(ContactRelation::$table, $parentColumn)
             ->model(ContactRelation::class)
@@ -524,15 +853,23 @@ final class ContactRelations
             }
         }
 
+        foreach ($areas as $counterpartId => $departments) {
+            if (isset($after[$counterpartId])) {
+                self::writeDepartments((int) $after[$counterpartId]['id'], $departments);
+            }
+        }
+
+        $events = [];
+
         foreach (array_diff_key($after, $before) as $row) {
-            ContactEvents::dispatch(ContactEvents::LINKED, self::eventPayload($row));
+            $events[] = [ContactEvents::LINKED, self::eventPayload($row)];
         }
 
         foreach (array_diff_key($before, $after) as $row) {
-            ContactEvents::dispatch(ContactEvents::UNLINKED, self::eventPayload(['deleted' => 'true'] + $row));
+            $events[] = [ContactEvents::UNLINKED, self::eventPayload(['deleted' => 'true'] + $row)];
         }
 
-        return $summary;
+        return [$summary, $events];
     }
 
     /**
@@ -556,7 +893,7 @@ final class ContactRelations
      */
     private static function writeBrands(array $relation, array $brandIds, array $allowed): array
     {
-        $wanted = array_values(array_intersect(array_unique(array_map('intval', $brandIds)), $allowed));
+        $wanted = array_values(array_intersect(array_unique(array_map([self::class, 'id'], $brandIds)), $allowed));
         $current = [];
 
         foreach (self::rows(ContactRelationBrand::find(['relation_id' => (int) $relation['id']])) as $row) {
@@ -576,6 +913,37 @@ final class ContactRelations
         }
 
         return $wanted;
+    }
+
+    /**
+     * @param list<string> $departments già ripulite da `cleanDepartments()`
+     * @return list<string>
+     */
+    private static function writeDepartments(int $relationId, array $departments): array
+    {
+        $current = [];
+
+        foreach (self::rows(ContactRelationDepartment::find(['relation_id' => $relationId])) as $row) {
+            $current[(string) $row['department']] = (int) $row['id'];
+        }
+
+        foreach ($departments as $department) {
+            if (!isset($current[$department])) {
+                $result = ContactRelationDepartment::create(['relation_id' => $relationId, 'department' => $department]);
+
+                if (!($result->success ?? false)) {
+                    throw new \RuntimeException('Area del referente non salvata.');
+                }
+            }
+        }
+
+        foreach ($current as $department => $rowId) {
+            if (!in_array($department, $departments, true)) {
+                ContactRelationDepartment::delete($rowId);
+            }
+        }
+
+        return $departments;
     }
 
     /**
@@ -656,17 +1024,32 @@ final class ContactRelations
         $other = self::counterpart($parentColumn);
         $model = self::counterpartModel($parentColumn);
         $key = $parentColumn === self::COMPANY ? 'contact' : 'company';
+        $relations = self::rows(ContactRelation::find([$parentColumn => $parentId], null, 'position', 'ASC'));
+        $areas = self::departmentsByRelation(array_map(static fn (array $row): int => (int) $row['id'], $relations));
         $out = [];
 
-        foreach (self::rows(ContactRelation::find([$parentColumn => $parentId], null, 'position', 'ASC')) as $row) {
+        foreach ($relations as $row) {
             $record = $model::findById((int) ($row[$other] ?? 0));
 
             if (is_array($record) && isset($record['id'])) {
-                $out[] = $row + [$key => $record];
+                $departments = $areas[(int) $row['id']] ?? [];
+                $out[] = ['departments' => $departments, 'department' => $departments[0] ?? ''] + $row + [$key => $record];
             }
         }
 
         return $out;
+    }
+
+    /** Un id da un valore della richiesta: un valore non scalare (`x[]=1`) vale 0. */
+    private static function id(mixed $value): int
+    {
+        return is_int($value) || (is_string($value) && preg_match('/^\s*\d+\s*$/', $value) === 1) ? (int) $value : 0;
+    }
+
+    /** Il peso di un accesso: `none` < `buyer` < `admin`. */
+    private static function rank(string $access): int
+    {
+        return (int) array_search($access, ContactRelation::ACCESS, true);
     }
 
     /** @return list<array<string, mixed>> */

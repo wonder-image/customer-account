@@ -22,9 +22,16 @@ use Wonder\Plugin\CustomerAccount\Support\ContactRelations;
  * Il sync del core cancella le righe di un repeater che non arriva nel POST:
  * qui il repeater si salva solo se il form l'ha mostrato (campo
  * `contact_relations_form`).
+ *
+ * Porta con sé `HasContactPoints` («Altri contatti»): la Resource che lo
+ * mostra mette `contactPointFields()` nel form e chiama
+ * `assertContactPoints()` in `mutateRequestValues()`; lettura e scrittura
+ * passano da qui.
  */
 trait HasContactRelations
 {
+    use HasContactPoints;
+
     public const RELATION_PEOPLE = 'contact_people';
     public const RELATION_COMPANIES = 'contact_companies';
     public const RELATION_MARKER = 'contact_relations_form';
@@ -66,7 +73,7 @@ trait HasContactRelations
                 ContactRelations::COMPANY
             ),
             RepeaterColumn::key('job_title')->text()->label(static::relationText('job_title'))->columnSpan(3),
-            static::departmentColumn(),
+            static::departmentsColumn(),
             ...static::relationFlagColumns(),
             static::relationBrandsColumn(),
         ], static::relationText('add_person'));
@@ -84,18 +91,21 @@ trait HasContactRelations
                 ContactRelations::PERSON
             ),
             RepeaterColumn::key('job_title')->text()->label(static::relationText('job_title'))->columnSpan(3),
-            static::departmentColumn(),
+            static::departmentsColumn(),
             ...static::relationFlagColumns(),
         ], static::relationText('add_company'));
     }
 
-    /** Il reparto del referente: a chi mandare fatture, newsletter e avvisi. */
-    protected static function departmentColumn(): Input
+    /**
+     * Di cosa si occupa il referente (vuoto = di tutto): a chi mandare
+     * fatture, newsletter e avvisi. Come i brand seguiti, non è una colonna
+     * del legame: la legge `hydrateRepeaterFormValues()`, la scrive `sync()`.
+     */
+    protected static function departmentsColumn(): Input
     {
-        return RepeaterColumn::key('department')
-            ->select(['' => static::relationText('department_none')] + ContactRelations::departments())
-            ->value('')
-            ->label(static::relationText('department'))
+        return RepeaterColumn::key('departments')
+            ->selectSearch(ContactRelations::departments(), true)
+            ->label(static::relationText('departments'))
             ->columnSpan(3);
     }
 
@@ -173,8 +183,14 @@ trait HasContactRelations
             ->label('');
     }
 
+    /** @var list<int> le controparti già legate alla scheda del form, lette da `hydrateRepeaterFormValues()` */
+    protected static array $relationLinkedIds = [];
+
     /**
-     * Le schede dell'altro lato per il select di una riga.
+     * Le schede dell'altro lato per il select di una riga. Con un filtro
+     * (`ContactRelations::useCounterpartFilter()`) solo le ammesse più quelle
+     * già legate alla scheda del form: altrimenti chi non le vede le
+     * staccherebbe salvando.
      *
      * @return array<int, string>
      */
@@ -200,6 +216,8 @@ trait HasContactRelations
             }
         }
 
+        $keep = [...ContactRelations::allowedCounterparts($parentColumn, array_keys($options)), ...static::$relationLinkedIds];
+        $options = array_intersect_key($options, array_flip($keep));
         asort($options, SORT_NATURAL | SORT_FLAG_CASE);
 
         return $options;
@@ -238,8 +256,8 @@ trait HasContactRelations
     }
 
     /**
-     * Le righe dei referenti si leggono da `contact_relations`: i brand
-     * seguiti stanno in un'altra tabella e si aggiungono qui, altrimenti la
+     * Le righe dei legami si leggono da `contact_relations`: aree e brand
+     * seguiti stanno in altre tabelle e si aggiungono qui, altrimenti la
      * colonna vuota li cancellerebbe al salvataggio.
      */
     public static function hydrateRepeaterFormValues(
@@ -248,10 +266,18 @@ trait HasContactRelations
         ?array $post = null,
         ?array $files = null
     ): array {
-        $values = parent::hydrateRepeaterFormValues($values, $parentId, $post, $files);
+        // Prima dei campi: il presenter chiama `formSchema()` dopo, e le scelte devono comprendere i legami di oggi.
+        static::$relationLinkedIds = ContactRelations::linkedIds(static::relationSide(), (int) ($parentId ?? 0));
+        $values = static::withContactPointValues(parent::hydrateRepeaterFormValues($values, $parentId, $post, $files), $parentId);
 
-        if (static::relationSide() === ContactRelations::COMPANY && is_array($values[self::RELATION_PEOPLE] ?? null)) {
-            $values[self::RELATION_PEOPLE] = ContactRelations::withBrandIds($values[self::RELATION_PEOPLE]);
+        $input = static::relationInputName();
+
+        if (is_array($values[$input] ?? null)) {
+            $values[$input] = ContactRelations::withDepartments($values[$input]);
+
+            if (static::relationSide() === ContactRelations::COMPANY) {
+                $values[$input] = ContactRelations::withBrandIds($values[$input]);
+            }
         }
 
         return $values;
@@ -301,6 +327,12 @@ trait HasContactRelations
                 Repeater::rowsFromRequest($inputName, $post, $files),
                 static fn (array $values): array => static::relationPersonPayload($values)
             );
+        }
+
+        $points = static::syncContactPoints((int) $parentId, $post);
+
+        if ($points !== null) {
+            $summary[static::$pointsInput] = $points;
         }
 
         return $summary;
