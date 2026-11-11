@@ -91,11 +91,11 @@ trait HasContactRelations
                 RepeaterColumn::key(ContactRelations::PERSON)
                     ->selectSearch(['' => (string) __t('contacts.option_none_f')] + static::relationOptions(ContactRelations::COMPANY))
                     ->label(static::relationText('person'))
-                    ->columnSpan(4),
+                    ->columnSpan(3),
                 ContactRelations::COMPANY
             ),
-            RepeaterColumn::key('job_title')->text()->label(static::relationText('job_title'))->columnSpan(4),
-            static::officeColumn(4),
+            RepeaterColumn::key('job_title')->text()->label(static::relationText('job_title'))->columnSpan(3),
+            static::officeColumn(3),
             ...static::workContactColumns(),
             static::relationBrandsColumn(),
         ], static::relationText('add_person'));
@@ -109,11 +109,11 @@ trait HasContactRelations
                 RepeaterColumn::key(ContactRelations::COMPANY)
                     ->selectSearch(['' => (string) __t('contacts.option_none_f')] + static::relationOptions(ContactRelations::PERSON))
                     ->label(static::relationText('company'))
-                    ->columnSpan(4),
+                    ->columnSpan(3),
                 ContactRelations::PERSON
             ),
-            RepeaterColumn::key('job_title')->text()->label(static::relationText('job_title'))->columnSpan(4),
-            static::officeColumn(4),
+            RepeaterColumn::key('job_title')->text()->label(static::relationText('job_title'))->columnSpan(3),
+            static::officeColumn(3),
             ...static::workContactColumns(),
         ], static::relationText('add_company'));
     }
@@ -139,9 +139,9 @@ trait HasContactRelations
         }
 
         return [
-            RepeaterColumn::key('email')->email()->label(static::relationText('work_contacts_email'))->columnSpan(6),
+            RepeaterColumn::key('email')->email()->label(static::relationText('work_contacts_email'))->columnSpan(4),
             RepeaterColumn::key('phone_prefix')->phonePrefix()->label(static::relationText('work_phone_prefix'))->columnSpan(2),
-            RepeaterColumn::key('phone')->tel()->label(static::relationText('work_contacts_phone'))->columnSpan(4),
+            RepeaterColumn::key('phone')->tel()->label(static::relationText('work_contacts_phone'))->columnSpan(3),
         ];
     }
 

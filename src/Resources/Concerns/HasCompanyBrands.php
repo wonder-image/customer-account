@@ -50,12 +50,12 @@ trait HasCompanyBrands
                         ->quickCreate(static::brandResource(), ['name'], null, 'name', (string) __t('contacts.brand_add'))
                         ->attribute('data-ca-company-brand')
                         ->label((string) __t('contacts.brand'))
-                        ->columnSpan(8),
+                        ->columnSpan(6),
                     RepeaterColumn::key('role')
                         ->select(CompanyBrands::roles())
                         ->value(CompanyBrandLink::ROLE_OWNER)
                         ->label((string) __t('contacts.brand_role'))
-                        ->columnSpan(4),
+                        ->columnSpan(3),
                 ])
                 ->nested()
                 ->repeaterSortable()
