@@ -4,6 +4,8 @@
 
 ### Added
 
+- «Tipo ufficio» creabile: dal «+» accanto al campo, su recapiti e referenti, nasce un tipo nuovo (`Models\OfficeType`, tabella `contact_office_types`; `Support\OfficeTypes`; `Resources\OfficeTypeResource` con la creazione rapida del framework). Un nome già creato si riusa, uno di serie si rifiuta; i tipi si rinominano e non si eliminano. `ContactRelations::departments()` li dà insieme a quelli di serie.
+- «Tipo ufficio» anche sui recapiti delle persone (`Models\ContactPointDepartment`, tabella `contact_point_departments`).
 - Riquadro «Contatti» diviso per tipo: `HasContactPoints::contactBoxByKindFields()` dà un elenco per le email e uno per i telefoni (`pointKindInputs()`: `contact_points_email`, `contact_points_phone`), ognuno con il suo «Aggiungi» e senza la tendina del tipo. `foldContactPointKinds()` li ricompone in `contact_points` prima di `applyContactPoints()` e `syncContactPoints()`, quindi regole e salvataggio non cambiano. `contactBoxFields()` resta com'è.
 
 ### Fixed
@@ -13,6 +15,8 @@
 
 ### Changed
 
+- Recapiti: via «Principale» e «Etichetta» dal form, «Si occupa di» diventa «Tipo ufficio» e sta in riga, uguale su recapiti, referenti e brand. Il principale resta quello di prima, poi la prima riga; l'etichetta salvata si conserva. `Migrations\PointOfficeTypesMigration` porta l'etichetta «Fatturazione» nel tipo «Amministrazione», una volta sola.
+- «Mansione» si chiama «Ruolo» (la chiave `job_title` non cambia).
 - Brand: i colori hanno un nome. `colors` si salva come lista di `{color, name}`; `BrandData::palette()` li rilegge e accetta anche la lista di soli esadecimali di prima (nome vuoto).
 - Brand: l'etichetta dei recapiti del brand è una tendina con le etichette di `ContactPoints::labels()`; un'etichetta libera salvata prima diventa vuota.
 - Form del brand: la testata è come quella del marchio del catalogo, logo a sinistra e accanto nome, brand principale, sito e «Archiviato».

@@ -9,6 +9,7 @@ use Wonder\Data\Validators\EmailValidator;
 use Wonder\Plugin\CustomerAccount\Models\CompanyPoint;
 use Wonder\Plugin\CustomerAccount\Models\CompanyPointDepartment;
 use Wonder\Plugin\CustomerAccount\Models\ContactPoint;
+use Wonder\Plugin\CustomerAccount\Models\ContactPointDepartment;
 use Wonder\Sql\Transaction;
 
 /**
@@ -54,6 +55,19 @@ final class ContactPoints
             self::COMPANY => CompanyPoint::class,
             default => throw new RuntimeException('Scheda sconosciuta: '.$owner),
         };
+    }
+
+    /**
+     * Dove stanno i tipi ufficio dei recapiti di una scheda: modello e colonna
+     * del proprietario.
+     *
+     * @return array{0: class-string<ContactPointDepartment|CompanyPointDepartment>, 1: string}
+     */
+    private static function departmentStore(string $owner): array
+    {
+        return $owner === self::COMPANY
+            ? [CompanyPointDepartment::class, 'company_id']
+            : [ContactPointDepartment::class, 'contact_id'];
     }
 
     /**
@@ -137,8 +151,8 @@ final class ContactPoints
      * principali (dalle colonne della scheda; un valore storico che le
      * regole di oggi non riconoscono si mostra grezzo, vedi `split()`), poi
      * gli altri nell'ordine scelto. Ogni riga ha `is_primary`, `locked` (l'email di accesso di una
-     * persona con account, etichetta `access`) e `departments` (le aree note,
-     * solo per le aziende; vuota = tutto).
+     * persona con account, etichetta `access`) e `departments` (i tipi ufficio noti,
+     * di aziende e persone; vuota = tutto).
      *
      * @param array<string, mixed>|null $card la scheda, se chi chiama l'ha già letta
      * @return list<array{kind: string, value: string, phone_prefix: string, label: string, is_primary: bool, locked: bool, departments: list<string>}>
@@ -155,7 +169,7 @@ final class ContactPoints
             return [];
         }
 
-        $areas = $owner === self::COMPANY ? self::departmentsByValue($ownerId) : [];
+        $areas = self::departmentsByValue($owner, $ownerId);
         $locked = self::lockedEmail($owner, $card);
         $out = [];
 
@@ -185,7 +199,7 @@ final class ContactPoints
      * @param list<array<string, mixed>> $rows
      * @return list<array<string, mixed>>
      */
-    public static function formRows(array $rows, bool $withDepartments = false): array
+    public static function formRows(array $rows, bool $withDepartments = true): array
     {
         $out = [];
 
@@ -300,8 +314,11 @@ final class ContactPoints
         $stored = [];
         $extra = [];
 
+        $labels = [];
+
         foreach ($saved as $row) {
             $extra[($row['kind'] ?? '').'|'.($row['value'] ?? '')] = true;
+            $labels[($row['kind'] ?? '').'|'.($row['value'] ?? '')] = self::label($row['label'] ?? '');
         }
 
         foreach (self::primaryRows($card) as $row) {
@@ -356,7 +373,12 @@ final class ContactPoints
             $seen[$key] = true;
             $clean['is_primary'] = ContactRelations::flag($row['is_primary'] ?? 'false') === 'true';
             // Senza la chiave le aree restano quelle di prima; il select svuotato posta `['']`.
-            $clean['departments'] = $owner === self::COMPANY && array_key_exists('departments', $row)
+            // Il riquadro non posta più l'etichetta: resta quella salvata su quel valore.
+            if (!array_key_exists('label', $row)) {
+                $clean['label'] = $labels[$key] ?? '';
+            }
+
+            $clean['departments'] = array_key_exists('departments', $row)
                 ? ContactRelations::cleanDepartments($row['departments'])
                 : null;
             $kept[] = $clean;
@@ -481,13 +503,10 @@ final class ContactPoints
         [$wanted] = self::clean($rows, $card);
 
         return Transaction::run(static function () use ($owner, $model, $ownerId, $card, $wanted): array {
-            $before = $owner === self::COMPANY ? self::currentKeys($owner, $ownerId, $card) : [];
+            $before = self::currentKeys($owner, $ownerId, $card);
             self::writePoints($model, $ownerId, $wanted);
-
-            if ($owner === self::COMPANY) {
-                // Le aree dei contatti tolti se ne vanno con loro; un contatto nuovo non eredita quelle rimaste.
-                self::writeDepartments($ownerId, [...self::primaryRows($card), ...$wanted], $before);
-            }
+            // I tipi dei contatti tolti se ne vanno con loro; un contatto nuovo non eredita quelli rimasti.
+            self::writeDepartments($owner, $ownerId, [...self::primaryRows($card), ...$wanted], $before);
 
             return $wanted;
         });
@@ -517,7 +536,7 @@ final class ContactPoints
         $split = self::split($owner, $rows, $card, false, self::of($owner, $ownerId));
 
         Transaction::run(static function () use ($owner, $model, $ownerModel, $ownerId, $card, $split): void {
-            $before = $owner === self::COMPANY ? self::currentKeys($owner, $ownerId, $card) : [];
+            $before = self::currentKeys($owner, $ownerId, $card);
             $changes = array_filter(
                 $split['columns'],
                 static fn (string $value, string $column): bool => (string) ($card[$column] ?? '') !== $value,
@@ -531,10 +550,8 @@ final class ContactPoints
             $others = array_values(array_filter($split['rows'], static fn (array $row): bool => !$row['is_primary']));
             self::writePoints($model, $ownerId, array_map([self::class, 'shape'], $others));
 
-            if ($owner === self::COMPANY) {
-                $untouched = array_values(array_filter(self::primaryRows($card), static fn (array $row): bool => in_array($row['kind'], $split['kept'], true)));
-                self::writeDepartments($ownerId, [...$split['rows'], ...$untouched], $before);
-            }
+            $untouched = array_values(array_filter(self::primaryRows($card), static fn (array $row): bool => in_array($row['kind'], $split['kept'], true)));
+            self::writeDepartments($owner, $ownerId, [...$split['rows'], ...$untouched], $before);
         });
 
         return self::all($owner, $ownerId);
@@ -555,7 +572,7 @@ final class ContactPoints
         $department = trim($department);
         $out = [];
         // Le aree salvate, anche quelle non più note: una casella che ne ha solo di sconosciute non si occupa «di tutto».
-        $areas = self::departmentsByValue($companyId);
+        $areas = self::departmentsByValue(self::COMPANY, $companyId);
 
         foreach (self::all(self::COMPANY, $companyId) as $row) {
             if ($row['kind'] !== self::EMAIL || $row['value'] === '') {
@@ -583,20 +600,21 @@ final class ContactPoints
      *
      * @return int le righe tolte
      */
-    public static function dropOrphanDepartments(int $companyId): int
+    public static function dropOrphanDepartments(int $ownerId, string $owner = self::COMPANY): int
     {
-        $card = $companyId > 0 ? CompanyPoint::ownerModel()::findById($companyId) : null;
+        $card = $ownerId > 0 ? self::model($owner)::ownerModel()::findById($ownerId) : null;
 
         if (!is_array($card) || !isset($card['id'])) {
             return 0;
         }
 
-        $current = self::currentKeys(self::COMPANY, $companyId, $card);
+        [$store, $fk] = self::departmentStore($owner);
+        $current = self::currentKeys($owner, $ownerId, $card);
         $dropped = 0;
 
-        foreach (self::rows(CompanyPointDepartment::find(['company_id' => $companyId])) as $row) {
+        foreach (self::rows($store::find([$fk => $ownerId])) as $row) {
             if (!isset($current[$row['kind'].'|'.$row['value']])) {
-                CompanyPointDepartment::delete((int) $row['id']);
+                $store::delete((int) $row['id']);
                 $dropped++;
             }
         }
@@ -895,12 +913,13 @@ final class ContactPoints
      * @param list<array<string, mixed>> $rows tutti i contatti dell'azienda, principali compresi
      * @param array<string, true>|null $before i contatti prima della scrittura (`kind|value`); null = tutti
      */
-    private static function writeDepartments(int $companyId, array $rows, ?array $before = null): void
+    private static function writeDepartments(string $owner, int $ownerId, array $rows, ?array $before = null): void
     {
+        [$store, $fk] = self::departmentStore($owner);
         $current = [];
         $known = ContactRelations::departments();
 
-        foreach (self::rows(CompanyPointDepartment::find(['company_id' => $companyId])) as $row) {
+        foreach (self::rows($store::find([$fk => $ownerId])) as $row) {
             $current[$row['kind'].'|'.$row['value']][(string) $row['department']] = (int) $row['id'];
         }
 
@@ -919,15 +938,18 @@ final class ContactPoints
                 $wanted = [];
             }
 
+            // Un tipo creato a mano ha per chiave il suo id: negli array torna intero, qui sempre testo.
+            $wanted = array_map('strval', $wanted);
+
             foreach (array_keys($stored) as $department) {
                 if ($existed && !isset($known[$department])) {
-                    $wanted[] = $department;
+                    $wanted[] = (string) $department;
                 }
             }
 
             foreach ($wanted as $department) {
                 if (!isset($stored[$department])) {
-                    $result = CompanyPointDepartment::create(['company_id' => $companyId, 'kind' => $row['kind'], 'value' => $row['value'], 'department' => $department]);
+                    $result = $store::create([$fk => $ownerId, 'kind' => $row['kind'], 'value' => $row['value'], 'department' => $department]);
 
                     if (!($result->success ?? false)) {
                         throw new RuntimeException('Area del contatto non salvata.');
@@ -936,15 +958,15 @@ final class ContactPoints
             }
 
             foreach ($stored as $department => $id) {
-                if (!in_array($department, $wanted, true)) {
-                    CompanyPointDepartment::delete($id);
+                if (!in_array((string) $department, $wanted, true)) {
+                    $store::delete($id);
                 }
             }
         }
 
         foreach ($current as $stored) {
             foreach ($stored as $id) {
-                CompanyPointDepartment::delete($id);
+                $store::delete($id);
             }
         }
     }
@@ -955,13 +977,15 @@ final class ContactPoints
      *
      * @return array<string, list<string>>
      */
-    private static function departmentsByValue(int $companyId): array
+    private static function departmentsByValue(string $owner, int $ownerId): array
     {
-        return RequestMemo::remember(CompanyPointDepartment::$table, 'company:'.$companyId, static function () use ($companyId): array {
+        [$store, $fk] = self::departmentStore($owner);
+
+        return RequestMemo::remember($store::$table, 'owner:'.$ownerId, static function () use ($store, $fk, $ownerId): array {
             $out = [];
 
             try {
-                $rows = self::rows(CompanyPointDepartment::find(['company_id' => $companyId], null, 'id', 'ASC'));
+                $rows = self::rows($store::find([$fk => $ownerId], null, 'id', 'ASC'));
             } catch (Throwable) {
                 return $out;
             }

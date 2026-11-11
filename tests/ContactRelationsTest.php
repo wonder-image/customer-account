@@ -599,7 +599,7 @@ check('niente più `department` nello schema del legame: lo toglie runTables() d
     $migrations = $manifest['database']['migrations'];
 
     return !array_key_exists('department', $schema) && !array_key_exists('ind_department', $schema)
-        && end($migrations) === RelationDepartmentsMigration::class;
+        && in_array(RelationDepartmentsMigration::class, $migrations, true);
 });
 
 check('principale dal lato persona: ogni azienda tiene il suo, gli altri referenti di quell\'azienda lo perdono', function () use ($tables) {

@@ -42,8 +42,12 @@ Le convenzioni del framework sono in `vendor/wonder-image/app/AGENTS.md`.
 - Contatti (riquadro «Contatti», `HasContactPoints::contactBoxFields()`,
   marker `contact_box_form`): il principale di ogni tipo resta nelle colonne
   `email` / `phone_prefix` / `phone` (tutto il sistema legge quelle), gli
-  altri in `contact_points` / `company_points`, le aree dei contatti delle
-  aziende in `company_point_departments` (per valore). Letture e scritture
+  altri in `contact_points` / `company_points`, i tipi ufficio dei contatti in
+  `company_point_departments` / `contact_point_departments` (per valore).
+  «Tipo ufficio» è un elenco solo (`ContactRelations::departments()`): di
+  serie più quelli creati dal «+» (`OfficeTypes`, `OfficeTypeResource`,
+  l'id salvato come testo). Il form non chiede più «Principale» né
+  l'etichetta. Letture e scritture
   solo da `ContactPoints` (`all()`, `split()`, `syncAll()`; `of()` / `sync()`
   per «Altri contatti»); la regola del principale sta in `split()`, mai nel
   JS. La Resource chiama `applyContactPoints()` in `mutateRequestValues()`.

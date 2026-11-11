@@ -33,6 +33,8 @@ $seed = static fn (): array => [
     'contact_points' => [],
     'company_points' => [],
     'company_point_departments' => [],
+    'contact_point_departments' => [],
+    'contact_office_types' => [],
     'contact_relations' => [],
     'external_references' => [],
 ];
@@ -187,9 +189,9 @@ check('form: righe del riquadro dalle colonne e dalla tabella; la scrittura pass
     ]]);
 
     return $form['contact_points'] === [
-        ['kind' => 'email', 'email' => 'anna@rossi.test', 'phone_prefix' => '', 'phone' => '', 'label' => '', 'is_primary' => 'true', 'locked' => ''],
-        ['kind' => 'phone', 'email' => '', 'phone_prefix' => '+39', 'phone' => '3331112222', 'label' => '', 'is_primary' => 'true', 'locked' => ''],
-        ['kind' => 'phone', 'email' => '', 'phone_prefix' => '+39', 'phone' => '021234567', 'label' => 'work', 'is_primary' => 'false', 'locked' => ''],
+        ['kind' => 'email', 'email' => 'anna@rossi.test', 'phone_prefix' => '', 'phone' => '', 'label' => '', 'is_primary' => 'true', 'locked' => '', 'departments' => []],
+        ['kind' => 'phone', 'email' => '', 'phone_prefix' => '+39', 'phone' => '3331112222', 'label' => '', 'is_primary' => 'true', 'locked' => '', 'departments' => []],
+        ['kind' => 'phone', 'email' => '', 'phone_prefix' => '+39', 'phone' => '021234567', 'label' => 'work', 'is_primary' => 'false', 'locked' => '', 'departments' => []],
     ]
         && Query::$tables['contacts'][2]['email'] === '' && Query::$tables['contacts'][2]['phone'] === '021234567'
         && ContactPoints::of(ContactPoints::CONTACT, 2) === [];
@@ -256,7 +258,7 @@ check('etichetta access: non si sceglie né si aggiunge', function () {
     return ContactPoints::label('access') === '' && !array_key_exists('access', ContactPoints::labels()) && $rows[0]['label'] === '';
 });
 
-check('aziende: «Si occupa di» per riga, segue l\'email nello scambio; senza la chiave resta, [\'\'] la toglie', function () use ($seed) {
+check('aziende: «Tipo ufficio» per riga, segue l\'email nello scambio; senza la chiave resta, [\'\'] la toglie', function () use ($seed) {
     Query::reset($seed());
     ContactPoints::syncAll(ContactPoints::COMPANY, 2, [
         ['kind' => 'email', 'email' => 'info@rossi.test', 'is_primary' => 'true', 'departments' => ['']],
@@ -284,17 +286,23 @@ check('aziende: «Si occupa di» per riga, segue l\'email nello scambio; senza l
         && ContactPoints::companyEmailsFor(99, 'administration') === [];
 });
 
-check('aziende: le aree dei contatti tolti se ne vanno, anche con «Altri contatti»; una persona non ha aree', function () use ($seed) {
+check('tipi ufficio: quelli dei contatti tolti se ne vanno, anche con «Altri contatti»; una persona ha i suoi, in una tabella a parte', function () use ($seed) {
     Query::reset($seed());
     ContactPoints::syncAll(ContactPoints::COMPANY, 2, [
         ['kind' => 'email', 'email' => 'info@rossi.test', 'departments' => ['sales']],
         ['kind' => 'email', 'email' => 'ordini@rossi.test', 'departments' => ['purchasing']],
     ]);
     ContactPoints::sync(ContactPoints::COMPANY, 2, []);
-    $person = ContactPoints::split(ContactPoints::CONTACT, [['kind' => 'email', 'email' => 'a@rossi.test', 'departments' => ['sales']]]);
+    ContactPoints::syncAll(ContactPoints::CONTACT, 2, [
+        ['kind' => 'email', 'email' => 'anna@rossi.test', 'departments' => ['sales']],
+        ['kind' => 'email', 'email' => 'casa@rossi.test', 'departments' => ['purchasing']],
+    ]);
+    $person = array_column(ContactPoints::formRows(ContactPoints::all(ContactPoints::CONTACT, 2)), 'departments', 'email');
+    ContactPoints::syncAll(ContactPoints::CONTACT, 2, [['kind' => 'email', 'email' => 'anna@rossi.test']]);
 
     return array_column(Query::$tables['company_point_departments'], 'value') === ['info@rossi.test']
-        && $person['rows'][0]['departments'] === null;
+        && $person === ['anna@rossi.test' => ['sales'], 'casa@rossi.test' => ['purchasing']]
+        && array_column(Query::$tables['contact_point_departments'], 'value') === ['anna@rossi.test'];
 });
 
 check('andata e ritorno: salvare il riquadro com\'è non cambia né la scheda né i contatti in più', function () use ($seed, $token, $card) {
@@ -336,7 +344,7 @@ check('andata e ritorno: salvare il riquadro com\'è non cambia né la scheda n�
         && [$card('contacts', 2), ContactPoints::of(ContactPoints::CONTACT, 2)] === $person;
 });
 
-check('Resource: riquadro con «Si occupa di» solo sulle aziende, script del modulo nel layout', function () {
+check('Resource: riquadro con «Tipo ufficio» su persone e aziende, senza «Principale» né etichetta; script del modulo nel layout', function () {
     $columns = static function (string $resource): array {
         foreach ($resource::formSchema() as $field) {
             if ($field->name === 'contact_points') {
@@ -348,8 +356,8 @@ check('Resource: riquadro con «Si occupa di» solo sulle aziende, script del mo
     };
     $script = ContactFormScript::html();
 
-    return $columns(ContactResource::class) === ['kind', 'email', 'phone_prefix', 'phone', 'is_primary', 'label', 'locked']
-        && $columns(CompanyResource::class) === ['kind', 'email', 'phone_prefix', 'phone', 'is_primary', 'label', 'departments', 'locked']
+    return $columns(ContactResource::class) === ['kind', 'email', 'phone_prefix', 'phone', 'departments', 'locked']
+        && $columns(CompanyResource::class) === ['kind', 'email', 'phone_prefix', 'phone', 'departments', 'locked']
         && str_starts_with($script, '<script>') && substr_count($script, '</script>') === 1 && str_contains($script, 'caContactForm')
         && str_contains($script, 'data-ca-point-kind') && ContactResource::usesContactBox() && CompanyResource::usesContactBox();
 });
@@ -401,7 +409,7 @@ check('elenchi per tipo: ogni elenco prende le sue righe, la scrittura passa dag
         && array_column($refused['contact_points_email'], 'email') === ['x@rossi.test'] && $refused['contact_points_phone'] === []
         && Query::$tables['contacts'][2]['email'] === 'anna@rossi.test' && Query::$tables['contacts'][2]['phone'] === '021234567'
         && array_column(ContactPoints::of(ContactPoints::CONTACT, 2), 'value') === ['due@rossi.test']
-        && $columns === ['kind', 'phone_prefix', 'phone', 'is_primary', 'label', 'locked']
+        && $columns === ['kind', 'phone_prefix', 'phone', 'departments', 'locked']
         && ByKindContactResource::usesContactBox();
 });
 

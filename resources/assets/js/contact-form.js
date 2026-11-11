@@ -48,29 +48,6 @@
             row.setAttribute('data-ca-point-locked-row', 'true');
             return;
         }
-
-        // «Email di accesso» non si sceglie: è solo della riga bloccata.
-        var label = row.querySelector('select[data-ca-point-label]');
-        var access = label && label.querySelector('option[value="access"]');
-        if (access) { access.remove(); }
-    }
-
-    // Un solo principale per tipo: accenderne uno spegne gli altri dello stesso tipo.
-    function demoteOthers(row) {
-        var primary = row.querySelector('select[data-ca-point-primary]');
-        var list = row.parentElement;
-        if (!primary || primary.value !== 'true' || !list) { return; }
-
-        var kind = kindOf(row);
-
-        list.querySelectorAll('.wi-repeater-row').forEach(function (other) {
-            if (other === row || kindOf(other) !== kind || other.getAttribute('data-ca-point-locked-row') === 'true') { return; }
-            var select = other.querySelector('select[data-ca-point-primary]');
-            if (select && select.value === 'true') {
-                select.value = 'false';
-                emit(select);
-            }
-        });
     }
 
     function refreshAll(root) {
@@ -86,10 +63,7 @@
 
         if (target.matches('select[data-ca-point-kind]')) {
             var row = rowOf(target);
-            if (row) { refreshRow(row); demoteOthers(row); }
-        } else if (target.matches('select[data-ca-point-primary]')) {
-            var primaryRow = rowOf(target);
-            if (primaryRow) { demoteOthers(primaryRow); }
+            if (row) { refreshRow(row); }
         }
     });
 

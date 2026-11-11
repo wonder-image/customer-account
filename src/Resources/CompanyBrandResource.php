@@ -99,11 +99,10 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
                         ->visibleWhen('kind', ContactPoints::PHONE),
                     RepeaterColumn::key('phone')->tel()->label((string) __t('contacts.point_kind_phone'))->columnFill()
                         ->visibleWhen('kind', ContactPoints::PHONE),
-                    RepeaterColumn::key('label')->select(['' => (string) __t('contacts.option_none_f')] + ContactPoints::labels())->value('')->label((string) __t('contacts.point_label'))->columnSpan(12),
+                    // Un tipo solo: il recapito di un brand è una voce del kit, non un filtro per i documenti.
+                    RepeaterColumn::key('label')->select(['' => (string) __t('contacts.option_none')] + ContactRelations::departments())->value('')->label((string) __t('contacts.office_type'))->columnSpan(3),
                 ])
                 ->nested()
-                ->repeaterAdvanced('label')
-                ->repeaterAdvancedLabel((string) __t('contacts.point_advanced'))
                 ->repeaterAddLabel((string) __t('contacts.point_add'))
                 ->label($labels['contacts']),
             FormField::key('socials')

@@ -9,16 +9,17 @@ use Wonder\App\ResourceSchema\RepeaterColumn;
 use Wonder\Elements\Components\RichText;
 use Wonder\Plugin\CustomerAccount\Support\ContactFormScript;
 use Wonder\Plugin\CustomerAccount\Support\ContactPoints;
+use Wonder\Plugin\CustomerAccount\Resources\OfficeTypeResource;
 use Wonder\Plugin\CustomerAccount\Support\ContactRelations;
 
 /**
  * I contatti di una Resource della rubrica, in due forme.
  *
  * - Il riquadro «Contatti» (`contactBoxFields()`, marker `contact_box_form`):
- *   tutte le email e i telefoni, con «Principale». Prende il posto dei campi
- *   `email`, `phone_prefix`, `phone`: la Resource chiama
+ *   tutte le email e i telefoni, ognuno con il suo «Tipo ufficio». Prende il
+ *   posto dei campi `email`, `phone_prefix`, `phone`: la Resource chiama
  *   `applyContactPoints()` in `mutateRequestValues()`, che rimette il
- *   principale in quei campi (così si salva con la scheda e passa dagli
+ *   principale (quello di prima, poi la prima riga) in quei campi (così si salva con la scheda e passa dagli
  *   stessi controlli); le altre righe le scrive `ContactPoints::syncAll()`.
  *   `contactBoxByKindFields()` è lo stesso riquadro diviso per tipo: un
  *   elenco per le email e uno per i telefoni, ognuno con il suo «Aggiungi»
@@ -46,14 +47,33 @@ trait HasContactPoints
         return static::relationSide() === ContactRelations::COMPANY ? ContactPoints::COMPANY : ContactPoints::CONTACT;
     }
 
+    /** La Resource del «+» accanto a «Tipo ufficio»: un modulo la cambia per i suoi permessi. */
+    public static function officeTypeResource(): string
+    {
+        return OfficeTypeResource::class;
+    }
+
     /**
-     * Il riquadro «Contatti»: tipo, email (o prefisso e numero), principale;
-     * etichetta e, per le aziende, «Si occupa di» stanno nelle informazioni
-     * avanzate della riga. La colonna dell'altro tipo la nasconde il
-     * framework (`visibleWhen('kind', …)`, lib 2.1.2-alpha.41): nascosta non
-     * si valida e non si posta. Lo script del modulo (`contactFormScript()`)
-     * spegne gli altri principali dello stesso tipo e blocca la riga
-     * dell'email di accesso; senza script il server applica le stesse regole.
+     * «Tipo ufficio» di un recapito: a quali uffici risponde (vuoto = a
+     * tutti). Sono gli stessi tipi dei referenti, e dal «+» se ne creano.
+     */
+    protected static function pointOfficeTypeColumn(int $span): Input
+    {
+        return RepeaterColumn::key('departments')
+            ->selectSearch(ContactRelations::departments(), true)
+            ->quickCreate(static::officeTypeResource(), ['name'], null, 'name', (string) __t('contacts.office_type_add'))
+            ->label((string) __t('contacts.office_type'))
+            ->columnSpan($span);
+    }
+
+    /**
+     * Il riquadro «Contatti»: tipo, email (o prefisso e numero) e «Tipo
+     * ufficio». La colonna dell'altro tipo la nasconde il framework
+     * (`visibleWhen('kind', …)`, lib 2.1.2-alpha.41): nascosta non si valida
+     * e non si posta. Lo script del modulo (`contactFormScript()`) blocca la
+     * riga dell'email di accesso; senza script il server applica la stessa
+     * regola. Il principale non si sceglie: resta quello di prima, poi la
+     * prima riga.
      * Una scheda che ha già un contatto non resta senza: l'ultima riga non si
      * elimina (`repeaterMinRows(1)`) e il server rifiuta un riquadro vuoto.
      *
@@ -66,9 +86,6 @@ trait HasContactPoints
         foreach (ContactPoints::KINDS as $kind) {
             $kinds[$kind] = (string) __t('contacts.point_kind_'.$kind);
         }
-
-        $company = static::contactPointOwner() === ContactPoints::COMPANY;
-        $labels = ['' => (string) __t('contacts.option_none_f')] + ContactPoints::labels() + [ContactPoints::ACCESS_LABEL => (string) __t('contacts.point_label_access')];
 
         return [
             FormField::key(static::$pointsInput)
@@ -84,21 +101,10 @@ trait HasContactPoints
                     RepeaterColumn::key('phone')->tel()->attribute('data-ca-point-only="phone"')
                         ->label((string) __t('contacts.point_kind_phone'))->columnFill()
                         ->visibleWhen('kind', ContactPoints::PHONE),
-                    RepeaterColumn::key('is_primary')
-                        ->select(['false' => (string) __t('contacts.no'), 'true' => (string) __t('contacts.yes')])->value('false')
-                        ->attribute('data-ca-point-primary')
-                        ->label((string) __t('contacts.point_primary'))->columnSpan(2),
-                    RepeaterColumn::key('label')->select($labels)->value('')->attribute('data-ca-point-label')
-                        ->label((string) __t('contacts.point_label'))->columnSpan($company ? 4 : 12),
-                    ...($company ? [
-                        RepeaterColumn::key('departments')->selectSearch(ContactRelations::departments(), true)
-                            ->label((string) __t('contacts.departments'))->columnSpan(8),
-                    ] : []),
+                    static::pointOfficeTypeColumn(4),
                     RepeaterColumn::key('locked')->hidden()->attribute('data-ca-point-locked'),
                 ])
                 ->nested()
-                ->repeaterAdvanced('label', 'departments')
-                ->repeaterAdvancedLabel((string) __t($company ? 'contacts.point_advanced_company' : 'contacts.point_advanced'))
                 ->repeaterMinRows(1)
                 ->repeaterAddLabel((string) __t('contacts.point_add'))
                 ->label((string) __t('contacts.box_label')),
@@ -133,8 +139,6 @@ trait HasContactPoints
      */
     public static function contactBoxByKindFields(): array
     {
-        $company = static::contactPointOwner() === ContactPoints::COMPANY;
-        $labels = ['' => (string) __t('contacts.option_none_f')] + ContactPoints::labels() + [ContactPoints::ACCESS_LABEL => (string) __t('contacts.point_label_access')];
         $fields = [];
 
         foreach (static::pointKindInputs() as $kind => $key) {
@@ -154,21 +158,10 @@ trait HasContactPoints
                 ->repeater([
                     RepeaterColumn::key('kind')->hidden()->value($kind)->attribute('data-ca-point-kind="'.$kind.'"'),
                     ...$value,
-                    RepeaterColumn::key('is_primary')
-                        ->select(['false' => (string) __t('contacts.no'), 'true' => (string) __t('contacts.yes')])->value('false')
-                        ->attribute('data-ca-point-primary')
-                        ->label((string) __t('contacts.point_primary'))->columnSpan(3),
-                    RepeaterColumn::key('label')->select($labels)->value('')->attribute('data-ca-point-label')
-                        ->label((string) __t('contacts.point_label'))->columnSpan($company ? 4 : 12),
-                    ...($company ? [
-                        RepeaterColumn::key('departments')->selectSearch(ContactRelations::departments(), true)
-                            ->label((string) __t('contacts.departments'))->columnSpan(8),
-                    ] : []),
+                    static::pointOfficeTypeColumn($kind === ContactPoints::EMAIL ? 5 : 4),
                     RepeaterColumn::key('locked')->hidden()->attribute('data-ca-point-locked'),
                 ])
                 ->nested()
-                ->repeaterAdvanced('label', 'departments')
-                ->repeaterAdvancedLabel((string) __t($company ? 'contacts.point_advanced_company' : 'contacts.point_advanced'))
                 ->repeaterAddLabel((string) __t('contacts.point_add_'.$kind))
                 ->label((string) __t('contacts.point_kind_'.$kind));
         }
@@ -284,7 +277,7 @@ trait HasContactPoints
 
             $owner = static::contactPointOwner();
             $rows = $id > 0 && !isset($post[static::$boxMarker])
-                ? ContactPoints::formRows(ContactPoints::all($owner, $id), $owner === ContactPoints::COMPANY)
+                ? ContactPoints::formRows(ContactPoints::all($owner, $id), true)
                 : [];
 
             foreach ($missing as $kind => $key) {
@@ -300,7 +293,7 @@ trait HasContactPoints
 
         $owner = static::contactPointOwner();
         $values[static::$pointsInput] = static::usesContactBox()
-            ? ContactPoints::formRows(ContactPoints::all($owner, $id), $owner === ContactPoints::COMPANY)
+            ? ContactPoints::formRows(ContactPoints::all($owner, $id), true)
             : ContactPoints::of($owner, $id);
 
         return $values;
@@ -413,10 +406,8 @@ trait HasContactPoints
         }
 
         if (!isset($post[static::$pointsMarker])) {
-            // I campi singoli possono aver cambiato l'email principale: le aree del valore vecchio non restano a nessuno.
-            if (static::contactPointOwner() === ContactPoints::COMPANY) {
-                ContactPoints::dropOrphanDepartments($parentId);
-            }
+            // I campi singoli possono aver cambiato l'email principale: i tipi del valore vecchio non restano a nessuno.
+            ContactPoints::dropOrphanDepartments($parentId, static::contactPointOwner());
 
             return null;
         }

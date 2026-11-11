@@ -258,7 +258,8 @@ final class ContactRelations
             $out[$key] = (string) __t('contacts.department_'.$key);
         }
 
-        return $out + self::$extraDepartments;
+        // I tipi creati a mano hanno per chiave il loro id: `+` e non `array_merge`, che li rinumera.
+        return $out + self::$extraDepartments + OfficeTypes::options();
     }
 
     /**
@@ -1023,6 +1024,9 @@ final class ContactRelations
             $current[(string) $row['department']] = (int) $row['id'];
         }
 
+        // Un tipo creato a mano ha per chiave il suo id: negli array torna intero, qui sempre testo.
+        $departments = array_map('strval', $departments);
+
         foreach ($departments as $department) {
             if (!isset($current[$department])) {
                 $result = ContactRelationDepartment::create(['relation_id' => $relationId, 'department' => $department]);
@@ -1034,7 +1038,7 @@ final class ContactRelations
         }
 
         foreach ($current as $department => $rowId) {
-            if (!in_array($department, $departments, true)) {
+            if (!in_array((string) $department, $departments, true)) {
                 ContactRelationDepartment::delete($rowId);
             }
         }

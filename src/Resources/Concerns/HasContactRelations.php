@@ -196,6 +196,7 @@ trait HasContactRelations
     {
         return RepeaterColumn::key('departments')
             ->selectSearch(ContactRelations::departments(), true)
+            ->quickCreate(static::officeTypeResource(), ['name'], null, 'name', (string) __t('contacts.office_type_add'))
             ->label(static::relationText('departments'))
             ->columnSpan(3);
     }
