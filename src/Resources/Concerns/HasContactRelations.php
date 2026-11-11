@@ -337,7 +337,7 @@ trait HasContactRelations
     ): array {
         // Prima dei campi: il presenter chiama `formSchema()` dopo, e le scelte devono comprendere i legami di oggi.
         static::$relationLinkedIds = ContactRelations::linkedIds(static::relationSide(), (int) ($parentId ?? 0));
-        $values = static::withContactPointValues(parent::hydrateRepeaterFormValues($values, $parentId, $post, $files), $parentId);
+        $values = static::withContactPointValues(parent::hydrateRepeaterFormValues($values, $parentId, $post, $files), $parentId, $post);
 
         $input = static::relationInputName();
 

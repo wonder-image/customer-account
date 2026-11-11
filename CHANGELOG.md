@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Riquadro «Contatti» diviso per tipo: `HasContactPoints::contactBoxByKindFields()` dà un elenco per le email e uno per i telefoni (`pointKindInputs()`: `contact_points_email`, `contact_points_phone`), ognuno con il suo «Aggiungi» e senza la tendina del tipo. `foldContactPointKinds()` li ricompone in `contact_points` prima di `applyContactPoints()` e `syncContactPoints()`, quindi regole e salvataggio non cambiano. `contactBoxFields()` resta com'è.
+
 ### Fixed
 
 - Riquadro «Contatti»: salvare una scheda senza modifiche non cambia più i recapiti. Un contatto in più già salvato non sale a principale (e non perde l'etichetta) quando la scheda non ne aveva uno; il prefisso salvato senza telefono resta. `ContactPoints::split()` riceve i contatti salvati (`$saved`).

@@ -20,6 +20,10 @@ use Wonder\Plugin\CustomerAccount\Support\ContactRelations;
  *   `applyContactPoints()` in `mutateRequestValues()`, che rimette il
  *   principale in quei campi (così si salva con la scheda e passa dagli
  *   stessi controlli); le altre righe le scrive `ContactPoints::syncAll()`.
+ *   `contactBoxByKindFields()` è lo stesso riquadro diviso per tipo: un
+ *   elenco per le email e uno per i telefoni, ognuno con il suo «Aggiungi»
+ *   (`contact_points_email`, `contact_points_phone`); al salvataggio tornano
+ *   un solo `contact_points` (`foldContactPointKinds()`).
  * - «Altri contatti» (`contactPointFields()`, marker `contact_points_form`):
  *   solo quelli in più, accanto ai campi della scheda. Resta per chi non è
  *   ancora passato al riquadro.
@@ -103,6 +107,112 @@ trait HasContactPoints
     }
 
     /**
+     * Le chiavi degli elenchi per tipo, `tipo => chiave`.
+     *
+     * @return array<string, string>
+     */
+    public static function pointKindInputs(): array
+    {
+        $out = [];
+
+        foreach (ContactPoints::KINDS as $kind) {
+            $out[$kind] = static::$pointsInput.'_'.$kind;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Il riquadro «Contatti» diviso per tipo: un elenco per le email e uno per
+     * i telefoni, senza la tendina del tipo. Le regole sono quelle di
+     * `contactBoxFields()` (stesso marker, stesso script); il minimo di una
+     * riga qui non c'è, perché varrebbe per ogni elenco: una scheda che aveva
+     * un contatto non resta senza perché lo rifiuta il server.
+     *
+     * @return list<Input>
+     */
+    public static function contactBoxByKindFields(): array
+    {
+        $company = static::contactPointOwner() === ContactPoints::COMPANY;
+        $labels = ['' => (string) __t('contacts.option_none_f')] + ContactPoints::labels() + [ContactPoints::ACCESS_LABEL => (string) __t('contacts.point_label_access')];
+        $fields = [];
+
+        foreach (static::pointKindInputs() as $kind => $key) {
+            $value = $kind === ContactPoints::EMAIL
+                ? [
+                    RepeaterColumn::key('email')->email()->attribute('data-ca-point-only="email"')
+                        ->label((string) __t('contacts.point_kind_email'))->columnFill(),
+                ]
+                : [
+                    RepeaterColumn::key('phone_prefix')->phonePrefix()->attribute('data-ca-point-only="phone"')
+                        ->label((string) __t('contacts.point_prefix'))->columnSpan(3),
+                    RepeaterColumn::key('phone')->tel()->attribute('data-ca-point-only="phone"')
+                        ->label((string) __t('contacts.point_kind_phone'))->columnFill(),
+                ];
+
+            $fields[] = FormField::key($key)
+                ->repeater([
+                    RepeaterColumn::key('kind')->hidden()->value($kind)->attribute('data-ca-point-kind="'.$kind.'"'),
+                    ...$value,
+                    RepeaterColumn::key('is_primary')
+                        ->select(['false' => (string) __t('contacts.no'), 'true' => (string) __t('contacts.yes')])->value('false')
+                        ->attribute('data-ca-point-primary')
+                        ->label((string) __t('contacts.point_primary'))->columnSpan(3),
+                    RepeaterColumn::key('label')->select($labels)->value('')->attribute('data-ca-point-label')
+                        ->label((string) __t('contacts.point_label'))->columnSpan($company ? 4 : 12),
+                    ...($company ? [
+                        RepeaterColumn::key('departments')->selectSearch(ContactRelations::departments(), true)
+                            ->label((string) __t('contacts.departments'))->columnSpan(8),
+                    ] : []),
+                    RepeaterColumn::key('locked')->hidden()->attribute('data-ca-point-locked'),
+                ])
+                ->nested()
+                ->repeaterAdvanced('label', 'departments')
+                ->repeaterAdvancedLabel((string) __t($company ? 'contacts.point_advanced_company' : 'contacts.point_advanced'))
+                ->repeaterAddLabel((string) __t('contacts.point_add_'.$kind))
+                ->label((string) __t('contacts.point_kind_'.$kind));
+        }
+
+        $fields[] = FormField::key(static::$boxMarker)->hidden()->value('1');
+
+        return $fields;
+    }
+
+    /**
+     * Gli elenchi per tipo tornano un solo `contact_points`, con il tipo
+     * dell'elenco (quello postato nella riga non conta), e le loro chiavi
+     * escono dai valori: da qui in poi il riquadro è uno, comunque sia stato
+     * disegnato.
+     */
+    public static function foldContactPointKinds(array $data): array
+    {
+        $rows = null;
+
+        foreach (static::pointKindInputs() as $kind => $key) {
+            if (!array_key_exists($key, $data)) {
+                continue;
+            }
+
+            $rows ??= [];
+
+            foreach (is_array($data[$key]) ? $data[$key] : [] as $row) {
+                if (is_array($row)) {
+                    $rows[] = ['kind' => $kind] + $row;
+                }
+            }
+
+            unset($data[$key]);
+        }
+
+        if ($rows !== null) {
+            $before = $data[static::$pointsInput] ?? [];
+            $data[static::$pointsInput] = [...(is_array($before) ? array_values($before) : []), ...$rows];
+        }
+
+        return $data;
+    }
+
+    /**
      * «Altri contatti»: solo i contatti in più, accanto ai campi `email`,
      * `phone_prefix`, `phone` della scheda. Per i form che non usano ancora
      * `contactBoxFields()`.
@@ -153,12 +263,38 @@ trait HasContactPoints
         return isset(static::safeFormFieldsByKey()[static::$boxMarker]);
     }
 
-    /** Aggiunge al form i contatti salvati, se il form li mostra e non arrivano già dal POST. */
-    public static function withContactPointValues(array $values, int|string|null $parentId): array
+    /**
+     * Aggiunge al form i contatti salvati, se il form li mostra e non arrivano
+     * già dal POST. Con gli elenchi per tipo ogni elenco prende le sue righe;
+     * dopo un salvataggio rifiutato (`$post` con il marker) un elenco che non
+     * è arrivato resta vuoto: le righe tolte non tornano dal database.
+     */
+    public static function withContactPointValues(array $values, int|string|null $parentId, ?array $post = null): array
     {
         $id = (int) ($parentId ?? 0);
+        $fields = static::safeFormFieldsByKey();
+        $kinds = array_filter(static::pointKindInputs(), static fn (string $key): bool => isset($fields[$key]));
 
-        if ($id <= 0 || array_key_exists(static::$pointsInput, $values) || !isset(static::safeFormFieldsByKey()[static::$pointsInput])) {
+        if ($kinds !== []) {
+            $missing = array_filter($kinds, static fn (string $key): bool => !array_key_exists($key, $values));
+
+            if ($missing === []) {
+                return $values;
+            }
+
+            $owner = static::contactPointOwner();
+            $rows = $id > 0 && !isset($post[static::$boxMarker])
+                ? ContactPoints::formRows(ContactPoints::all($owner, $id), $owner === ContactPoints::COMPANY)
+                : [];
+
+            foreach ($missing as $kind => $key) {
+                $values[$key] = array_values(array_filter($rows, static fn (array $row): bool => $row['kind'] === $kind));
+            }
+
+            return $values;
+        }
+
+        if ($id <= 0 || array_key_exists(static::$pointsInput, $values) || !isset($fields[static::$pointsInput])) {
             return $values;
         }
 
@@ -184,6 +320,8 @@ trait HasContactPoints
      */
     protected static function applyContactPoints(array $values, ?array $oldValues = null): array
     {
+        $values = static::foldContactPointKinds($values);
+
         if (!isset($values[static::$boxMarker])) {
             static::assertContactPoints($values, $oldValues);
 
@@ -266,6 +404,7 @@ trait HasContactPoints
     /** Scrive i contatti postati, solo se il form li ha mostrati. */
     protected static function syncContactPoints(int $parentId, array $post): ?array
     {
+        $post = static::foldContactPointKinds($post);
         $posted = $post[static::$pointsInput] ?? [];
         $rows = is_array($posted) ? array_values($posted) : [];
 

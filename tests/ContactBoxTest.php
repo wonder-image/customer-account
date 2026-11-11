@@ -354,4 +354,55 @@ check('Resource: riquadro con «Si occupa di» solo sulle aziende, script del mo
         && str_contains($script, 'data-ca-point-kind') && ContactResource::usesContactBox() && CompanyResource::usesContactBox();
 });
 
+// Il riquadro diviso per tipo: stessa Resource, un elenco per le email e uno per i telefoni.
+final class ByKindContactResource extends ContactResource
+{
+    public static function formSchema(): array
+    {
+        $fields = array_filter(parent::formSchema(), static fn ($field): bool => !in_array($field->name, ['contact_points', 'contact_box_form'], true));
+
+        return [...array_values($fields), ...static::contactBoxByKindFields()];
+    }
+}
+
+check('elenchi per tipo: tornano un solo riquadro al salvataggio, il tipo è quello dell\'elenco, le chiavi non restano nei valori', function () use ($seed, $token, $reject) {
+    Query::reset($seed());
+    $base = ['name' => 'Anna', 'surname' => 'Bianchi', 'active' => 'true', '_csrf' => $token, 'contact_box_form' => '1'];
+    $saved = ByKindContactResource::mutateRequestValues($base + [
+        // Il tipo postato nella riga non conta; la riga vuota si salta.
+        'contact_points_email' => [['kind' => 'phone', 'email' => 'nuova@rossi.test', 'is_primary' => 'true'], ['kind' => 'email', 'email' => '', 'is_primary' => 'false']],
+        'contact_points_phone' => [['kind' => 'phone', 'phone_prefix' => '+39', 'phone' => '021234567', 'is_primary' => 'false']],
+    ], 'update', 'backend', Query::$tables['contacts'][2]);
+    $folded = ByKindContactResource::foldContactPointKinds(['contact_points_phone' => [['phone' => '1']], 'x' => 1]);
+    $none = ByKindContactResource::foldContactPointKinds(['x' => 1]);
+    $empty = $reject(static fn () => ByKindContactResource::mutateRequestValues($base, 'update', 'backend', Query::$tables['contacts'][2]));
+
+    return $saved['email'] === 'nuova@rossi.test' && $saved['phone'] === '021234567'
+        && array_intersect_key($saved, ['contact_points' => 1, 'contact_points_email' => 1, 'contact_points_phone' => 1, 'contact_box_form' => 1]) === []
+        && $folded === ['x' => 1, 'contact_points' => [['kind' => 'phone', 'phone' => '1']]] && $none === ['x' => 1]
+        && $empty === (string) __t('contacts.point_required');
+});
+
+check('elenchi per tipo: ogni elenco prende le sue righe, la scrittura passa dagli stessi punti, un salvataggio rifiutato non ripesca le righe tolte', function () use ($seed) {
+    $tables = $seed();
+    $tables['contact_points'][1] = ['id' => 1, 'contact_id' => 2, 'kind' => 'phone', 'value' => '021234567', 'phone_prefix' => '+39', 'label' => 'work', 'position' => 0, 'deleted' => 'false'];
+    Query::reset($tables);
+    $form = ByKindContactResource::hydrateRepeaterFormValues([], 2, [], []);
+    $refused = ByKindContactResource::hydrateRepeaterFormValues([], 2, ['contact_box_form' => '1', 'contact_points_email' => [['email' => 'x@rossi.test']]], []);
+    ByKindContactResource::syncRepeaterRelations(2, ['contact_box_form' => '1',
+        'contact_points_email' => [['email' => 'anna@rossi.test', 'is_primary' => 'true'], ['email' => 'due@rossi.test', 'is_primary' => 'false']],
+        'contact_points_phone' => [['phone_prefix' => '+39', 'phone' => '021234567', 'is_primary' => 'true']],
+    ]);
+    $columns = array_map(static fn ($column) => $column->name, (array) ((ByKindContactResource::safeFormFieldsByKey()['contact_points_phone']->get('context') ?? [])['columns'] ?? []));
+
+    return array_column($form['contact_points_email'], 'email') === ['anna@rossi.test']
+        && array_column($form['contact_points_phone'], 'phone') === ['3331112222', '021234567']
+        && !array_key_exists('contact_points', $form)
+        && array_column($refused['contact_points_email'], 'email') === ['x@rossi.test'] && $refused['contact_points_phone'] === []
+        && Query::$tables['contacts'][2]['email'] === 'anna@rossi.test' && Query::$tables['contacts'][2]['phone'] === '021234567'
+        && array_column(ContactPoints::of(ContactPoints::CONTACT, 2), 'value') === ['due@rossi.test']
+        && $columns === ['kind', 'phone_prefix', 'phone', 'is_primary', 'label', 'locked']
+        && ByKindContactResource::usesContactBox();
+});
+
 summary();
