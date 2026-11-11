@@ -13,6 +13,7 @@ use Wonder\Plugin\CustomerAccount\Support\BrandData;
 use Wonder\Plugin\CustomerAccount\Support\CompanyBrands;
 use Wonder\Plugin\CustomerAccount\Support\ContactPoints;
 use Wonder\Plugin\CustomerAccount\Support\ContactRelations;
+use Wonder\Plugin\CustomerAccount\Support\Crm;
 
 /**
  * I brand delle aziende. Non ha un menu: si scelgono e si creano dalla scheda
@@ -23,9 +24,11 @@ use Wonder\Plugin\CustomerAccount\Support\ContactRelations;
  *
  * Il form ha due gruppi: i dati per tutti (in testa il logo accanto a nome,
  * gruppo, sito e archiviato, poi domini email e descrizione) e il «brand kit»
- * (recapiti con etichette preimpostate, social, colori con il loro nome, tono,
+ * (recapiti con il loro ufficio, social, colori con il loro nome, tono,
  * settore, lingua, materiali), che compare e si salva solo se
- * `CompanyBrands::kitEnabled()`.
+ * `CompanyBrands::kitEnabled()`. Con il CRM spento (`Crm::enabled()`) il kit
+ * mostra un'email e un telefono soli e nessun social: i recapiti in più e i
+ * social già salvati restano dove sono.
  * Liste e scelte passano da `BrandData`: settori ATECO / NACE, lingue ISO.
  *
  * Un modulo che usa altri ruoli la estende e cambia `permissionSchema()`.
@@ -37,6 +40,12 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
     public static string $orderDirection = 'ASC';
 
     public static function path(): string { return 'company-brands'; }
+
+    /** La Resource del «+» accanto a «Ufficio»: un modulo la cambia per i suoi permessi. */
+    public static function officeTypeResource(): string
+    {
+        return OfficeTypeResource::class;
+    }
     public static function textSchema(): array
     {
         return ['label' => (string) __t('contacts.brand'), 'plural_label' => (string) __t('contacts.brands')];
@@ -82,37 +91,49 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
             return $fields;
         }
 
-        $kinds = [];
+        $primary = [
+            FormField::key('email')->email()->label($labels['email']),
+            FormField::key('phone_prefix')->phonePrefix()->label($labels['phone_prefix']),
+            FormField::key('phone')->tel()->label($labels['phone']),
+        ];
 
-        foreach (ContactPoints::KINDS as $kind) {
-            $kinds[$kind] = (string) __t('contacts.point_kind_'.$kind);
+        if (Crm::enabled()) {
+            $primary = [
+                FormField::key('contacts')
+                    ->repeater([
+                        RepeaterColumn::key('kind')->select(ContactPoints::kindOptions())->value(ContactPoints::EMAIL)->label((string) __t('contacts.point_kind'))->columnSpan(3),
+                        RepeaterColumn::key('email')->email()->label((string) __t('contacts.point_kind_email'))->columnFill()
+                            ->visibleWhen('kind', ContactPoints::EMAIL),
+                        RepeaterColumn::key('phone_prefix')->phonePrefix()->label((string) __t('contacts.point_prefix'))->columnSpan(2)
+                            ->visibleWhen('kind', ContactPoints::PHONE_KINDS),
+                        RepeaterColumn::key('phone')->tel()->label((string) __t('contacts.point_kind_phone'))->columnFill()
+                            ->visibleWhen('kind', ContactPoints::PHONE_KINDS),
+                        // Un ufficio solo: il recapito di un brand è una voce del kit, non un filtro per i documenti.
+                        RepeaterColumn::key('label')
+                            ->selectSearch(ContactRelations::departments())
+                            ->value(ContactRelations::GENERAL)
+                            ->quickCreate(static::officeTypeResource(), ['name'], null, 'name', (string) __t('contacts.office_type_add'))
+                            ->quickCreateCompact()
+                            ->label((string) __t('contacts.office_type'))
+                            ->columnSpan(3),
+                    ])
+                    ->nested()
+                    ->repeaterAddLabel((string) __t('contacts.point_add'))
+                    ->label($labels['contacts']),
+                FormField::key('socials')
+                    ->repeater([
+                        RepeaterColumn::key('network')->select(BrandData::socials())->label((string) __t('contacts.brand_social_network'))->columnSpan(4),
+                        RepeaterColumn::key('url')->url()->label((string) __t('contacts.brand_social_url'))->columnFill(),
+                    ])
+                    ->nested()
+                    ->repeaterAddLabel((string) __t('contacts.brand_social_add'))
+                    ->label($labels['socials']),
+            ];
         }
 
         return [
             ...$fields,
-            FormField::key('contacts')
-                ->repeater([
-                    RepeaterColumn::key('kind')->select($kinds)->value(ContactPoints::EMAIL)->label((string) __t('contacts.point_kind'))->columnSpan(3),
-                    RepeaterColumn::key('email')->email()->label((string) __t('contacts.point_kind_email'))->columnFill()
-                        ->visibleWhen('kind', ContactPoints::EMAIL),
-                    RepeaterColumn::key('phone_prefix')->phonePrefix()->label((string) __t('contacts.point_prefix'))->columnSpan(2)
-                        ->visibleWhen('kind', ContactPoints::PHONE),
-                    RepeaterColumn::key('phone')->tel()->label((string) __t('contacts.point_kind_phone'))->columnFill()
-                        ->visibleWhen('kind', ContactPoints::PHONE),
-                    // Un tipo solo: il recapito di un brand è una voce del kit, non un filtro per i documenti.
-                    RepeaterColumn::key('label')->select(['' => (string) __t('contacts.option_none')] + ContactRelations::departments())->value('')->label((string) __t('contacts.office_type'))->columnSpan(3),
-                ])
-                ->nested()
-                ->repeaterAddLabel((string) __t('contacts.point_add'))
-                ->label($labels['contacts']),
-            FormField::key('socials')
-                ->repeater([
-                    RepeaterColumn::key('network')->select(BrandData::socials())->label((string) __t('contacts.brand_social_network'))->columnSpan(4),
-                    RepeaterColumn::key('url')->url()->label((string) __t('contacts.brand_social_url'))->columnFill(),
-                ])
-                ->nested()
-                ->repeaterAddLabel((string) __t('contacts.brand_social_add'))
-                ->label($labels['socials']),
+            ...$primary,
             FormField::key('colors')
                 ->repeater([
                     RepeaterColumn::key('color')->color()->label((string) __t('contacts.brand_color'))->columnSpan(4),
@@ -132,12 +153,14 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
     /**
      * Due gruppi: i dati del brand e, se acceso, il brand kit. La testata è
      * come quella del marchio del catalogo: il logo a sinistra, nome, brand
-     * principale, sito e archiviazione accanto; sotto il resto.
+     * principale, sito e archiviazione accanto; sotto il resto. Un modulo
+     * aggiunge i suoi riquadri con `extraFormFields()` e `extraFormCards()`.
      */
     public static function formLayoutSchema(): ?Form
     {
         $head = ['name', 'parent_id', 'website', 'archived'];
-        $widths = ['sector' => 8, 'language' => 4];
+        $widths = ['sector' => 8, 'language' => 4, 'email' => 6, 'phone_prefix' => 2, 'phone' => 4];
+        $extra = static::extraFormFields();
         $kit = array_flip(BrandData::KIT_FIELDS);
         $fields = [];
         $groups = [[], []];
@@ -147,7 +170,7 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
         }
 
         foreach ($fields as $name => $field) {
-            if ($name !== 'logo' && !in_array($name, $head, true)) {
+            if ($name !== 'logo' && !in_array($name, $head, true) && !in_array($name, $extra, true)) {
                 $groups[isset($kit[$name]) ? 1 : 0][] = $field->columnSpan($widths[$name] ?? 12);
             }
         }
@@ -169,13 +192,43 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
             ]);
         }
 
-        return (new Form)->columns(12)->components($cards);
+        return (new Form)->columns(12)->components([...$cards, ...static::extraFormCards($fields)]);
     }
+
+    /**
+     * I campi di `formSchema()` che non vanno nei due gruppi: li dispone `extraFormCards()`.
+     *
+     * @return list<string>
+     */
+    protected static function extraFormFields(): array
+    {
+        return [];
+    }
+
+    /**
+     * I riquadri in più di un modulo, dopo i dati del brand e il kit.
+     *
+     * @param array<string, mixed> $fields i campi del form per nome
+     * @return list<Card>
+     */
+    protected static function extraFormCards(array $fields): array
+    {
+        return [];
+    }
+
     /** Liste in JSON: nel form tornano righe del repeater. */
     public static function mutateFormValues(array $values, string $mode, string $context = 'backend'): array
     {
         $values['domains'] = array_map(static fn (string $domain): array => ['domain' => $domain], BrandData::domainsOf($values));
         $values['contacts'] = BrandData::contactsOf($values);
+        $offices = ContactRelations::departments();
+
+        // Il select dell'ufficio non ha una voce vuota: un recapito senza ufficio (o con un'etichetta di prima) è «Generale».
+        foreach ($values['contacts'] as $index => $row) {
+            if (!isset($offices[(string) ($row['label'] ?? '')])) {
+                $values['contacts'][$index]['label'] = ContactRelations::GENERAL;
+            }
+        }
 
         foreach (['socials', 'colors'] as $field) {
             if (isset($values[$field]) && is_string($values[$field])) {
@@ -246,7 +299,9 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
      * non si controlla. Il brand principale (`parent_id`) passa dalle regole
      * di `CompanyBrands::parentProblem()`: un livello solo. I dati del brand
      * passano dalle regole di `BrandData` (URL solo http/https, colori
-     * esadecimali, social della lista); il kit solo se è acceso. Il logo passa
+     * esadecimali, social della lista); il kit solo se è acceso. Con il CRM
+     * spento l'email e il telefono del form sono la prima email e il primo
+     * telefono dei recapiti: gli altri recapiti e i social salvati restano. Il logo passa
      * solo come file caricato: il framework ne controlla estensione e
      * dimensione e ripulisce un SVG.
      */
@@ -254,7 +309,14 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
     {
         $upload = $values['logo'] ?? null;
         $manifest = $values['logo__wi_files'] ?? null;
-        [$data, $problems] = BrandData::clean($values, CompanyBrands::kitEnabled());
+        $kit = CompanyBrands::kitEnabled();
+        $primaryOnly = $kit && !Crm::enabled();
+
+        if ($primaryOnly) {
+            $values = static::primaryContacts($values, $oldValues ?? []);
+        }
+
+        [$data, $problems] = BrandData::clean($values, $kit, $oldValues ?? [], $primaryOnly);
 
         if ($problems !== []) {
             $labels = static::labelSchema();
@@ -314,6 +376,45 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
         if ($action === 'store') {
             $values['slug'] = CompanyBrands::slugFor($name);
         }
+
+        return $values;
+    }
+
+    /**
+     * Con il CRM spento il form posta `email`, `phone_prefix` e `phone`: qui
+     * diventano le prime due righe di `contacts`, con il tipo di telefono e
+     * l'ufficio che avevano. Un campo non postato tiene il valore salvato;
+     * senza nessuno dei tre i recapiti non si toccano.
+     *
+     * @param array<string, mixed> $values
+     * @param array<string, mixed> $stored
+     * @return array<string, mixed>
+     */
+    protected static function primaryContacts(array $values, array $stored): array
+    {
+        $posted = array_intersect_key($values, array_flip(['email', 'phone_prefix', 'phone']));
+
+        if ($posted === []) {
+            return $values;
+        }
+
+        $first = [];
+
+        foreach (BrandData::contactsOf($stored) as $row) {
+            $first[ContactPoints::family($row['kind'] ?? '')] ??= $row;
+        }
+
+        $email = $first['email'] ?? [];
+        $phone = $first['phone'] ?? [];
+        $values['contacts'] = [
+            ['kind' => ContactPoints::EMAIL, 'email' => $posted['email'] ?? ($email['email'] ?? ''), 'label' => $email['label'] ?? ''],
+            [
+                'kind' => $phone['kind'] ?? ContactPoints::PHONE,
+                'phone_prefix' => $posted['phone_prefix'] ?? ($phone['phone_prefix'] ?? ''),
+                'phone' => $posted['phone'] ?? ($phone['phone'] ?? ''),
+                'label' => $phone['label'] ?? '',
+            ],
+        ];
 
         return $values;
     }

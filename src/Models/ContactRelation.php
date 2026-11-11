@@ -22,7 +22,9 @@ use Wonder\Sql\TableSchema as Column;
  *
  * `email`, `phone_prefix`, `phone` sono i contatti di lavoro del referente
  * per questa azienda (facoltativi): a chi scrivere per lei. Non sono mai
- * un'email di accesso né servono a collegare un account.
+ * un'email di accesso né servono a collegare un account. Sono il primo
+ * email e il primo telefono dei recapiti del referente per l'azienda
+ * (`ContactRelationPoint`), che `Support\ContactRelations` tiene allineati.
  */
 class ContactRelation extends Model
 {
@@ -36,9 +38,9 @@ class ContactRelation extends Model
 
     /**
      * Le aree di base di cui si occupa un referente (in `contact_relation_departments`,
-     * nessuna = tutte); altre si aggiungono con `ContactRelations::addDepartment()`.
+     * nessuna = tutte, come `general`); altre si aggiungono con `ContactRelations::addDepartment()`.
      */
-    public const DEPARTMENTS = ['administration', 'purchasing', 'sales', 'technical', 'management', 'other'];
+    public const DEPARTMENTS = ['general', 'administration', 'purchasing', 'sales', 'technical', 'management', 'other'];
 
     public static string $table = 'contact_relations';
     public static string $folder = 'contacts';

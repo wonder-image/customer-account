@@ -9,6 +9,7 @@ use Wonder\Plugin\CustomerAccount\Models\Contact;
 use Wonder\Plugin\CustomerAccount\Models\ContactRelation;
 use Wonder\Plugin\CustomerAccount\Models\ContactRelationBrand;
 use Wonder\Plugin\CustomerAccount\Models\ContactRelationDepartment;
+use Wonder\Plugin\CustomerAccount\Models\ContactRelationPoint;
 use Wonder\Sql\Transaction;
 
 /**
@@ -24,12 +25,21 @@ use Wonder\Sql\Transaction;
  *
  * Allo stesso modo un referente si occupa di una o più aree
  * (`contact_relation_departments`): senza righe si occupa di tutto. Chi deve
- * scegliere a chi mandare un documento parte da `peopleFor()`.
+ * scegliere a chi mandare un documento parte da `peopleFor()`. L'area
+ * «Generale» (`GENERAL`) vale come nessuna area: risponde per tutte
+ * (`coversDepartment()`). I form ne scelgono una sola (`singleDepartment()`).
+ *
+ * I recapiti del referente per l'azienda stanno in `contact_relation_points`
+ * (`points` nelle righe di `sync()` e in quelle lette); la prima email e il
+ * primo telefono restano anche sulle colonne del legame.
  */
 final class ContactRelations
 {
     public const COMPANY = 'company_id';
     public const PERSON = 'person_id';
+
+    /** L'area che vale per tutte, come nessuna area. */
+    public const GENERAL = 'general';
 
     private static ?bool $override = null;
 
@@ -133,13 +143,22 @@ final class ContactRelations
      * Toglie le righe senza controparte, le controparti che non esistono e i
      * doppioni (vince la prima). Una coppia che esiste già, anche cancellata,
      * riprende l'id della sua riga: così la chiave unica azienda/persona non
-     * salta e la riga torna viva. Dal lato azienda al massimo un referente
-     * principale (il primo); dal lato persona ogni riga è un'azienda diversa e
-     * tiene il suo `is_primary` (gli altri referenti di quell'azienda lo
-     * perdono in `sync()`). Se la riga non porta `access`, resta quello di
-     * prima; con un `useAccessGuard()` che dice no, l'accesso non sale oltre
-     * quello salvato (`none` per un legame nuovo). Le aree non sono colonne
-     * del legame: le scrive `sync()`. Un valore non scalare vale vuoto.
+     * salta e la riga torna viva.
+     *
+     * `is_primary`, `receives_documents` e `access` contano solo se la riga
+     * ne porta la chiave: senza, un legame vivo tiene il valore salvato e
+     * uno nuovo (o riaperto) nasce principale, con i documenti e con accesso
+     * `buyer`. Con un `useAccessGuard()` che dice no, l'accesso non sale oltre
+     * quello salvato (`none` per un legame nuovo). Fra le righe che postano
+     * `is_primary`, dal lato azienda resta principale solo la prima; dal lato
+     * persona ogni riga è un'azienda diversa e tiene il suo (gli altri
+     * referenti di quell'azienda lo perdono in `sync()`).
+     *
+     * Con `points` (le righe dei recapiti, vedi `sync()`) `email`,
+     * `phone_prefix` e `phone` sono la prima email e il primo telefono della
+     * lista; senza, valgono i campi singoli (`workContacts()`). Le aree e i
+     * recapiti non sono colonne del legame: li scrive `sync()`. Un valore non
+     * scalare vale vuoto.
      *
      * @param list<array<string, mixed>> $posted
      * @param list<array<string, mixed>> $existing tutte le righe del padre, cancellate comprese
@@ -178,8 +197,10 @@ final class ContactRelations
             $seen[$counterpartId] = true;
             $stored = $existingByCounterpart[$counterpartId] ?? null;
             // Lo stato salvato conta solo per un legame vivo: uno cancellato che torna riparte da `none`.
-            $before = $stored !== null && ($stored['deleted'] ?? 'false') === 'false' ? self::access($stored['access'] ?? null) : ContactRelation::ACCESS_NONE;
-            $access = self::access($row['access'] ?? $stored['access'] ?? null);
+            $live = $stored !== null && ($stored['deleted'] ?? 'false') === 'false';
+            $before = $live ? self::access($stored['access'] ?? null) : ContactRelation::ACCESS_NONE;
+            // Senza la chiave: un legame vivo resta com'è, uno nuovo nasce `buyer`.
+            $access = array_key_exists('access', $row) ? self::access($row['access']) : ($live ? $before : ContactRelation::ACCESS_BUYER);
             $companyId = $parentColumn === self::COMPANY ? $parentId : $counterpartId;
             $personId = $parentColumn === self::COMPANY ? $counterpartId : $parentId;
 
@@ -190,15 +211,15 @@ final class ContactRelations
             $clean = [
                 $other => $counterpartId,
                 'job_title' => is_scalar($row['job_title'] ?? null) ? trim((string) $row['job_title']) : '',
-                'is_primary' => self::flag($row['is_primary'] ?? 'false'),
-                'receives_documents' => self::flag($row['receives_documents'] ?? 'false'),
+                'is_primary' => self::storedFlag($row, 'is_primary', $live ? $stored : null),
+                'receives_documents' => self::storedFlag($row, 'receives_documents', $live ? $stored : null),
                 'access' => $access,
-            ] + self::workContacts($row, $stored ?? []) + [
+            ] + (array_key_exists('points', $row) ? self::mirror(self::cleanPoints($row['points'])) : self::workContacts($row, $stored ?? [])) + [
                 'deleted' => 'false',
             ];
 
-            // Un solo principale per azienda: dal lato persona le righe sono aziende diverse.
-            if ($clean['is_primary'] === 'true' && $parentColumn === self::COMPANY) {
+            // Un solo principale per azienda fra chi lo posta: dal lato persona le righe sono aziende diverse.
+            if (array_key_exists('is_primary', $row) && $clean['is_primary'] === 'true' && $parentColumn === self::COMPANY) {
                 $clean['is_primary'] = $primary ? 'false' : 'true';
                 $primary = true;
             }
@@ -230,6 +251,58 @@ final class ContactRelations
         $prefix = array_key_exists('phone_prefix', $row) ? (ContactPoints::phonePrefix($row['phone_prefix']) ?? '') : (string) ($stored['phone_prefix'] ?? '');
 
         return ['email' => $email, 'phone_prefix' => $phone !== '' ? $prefix : '', 'phone' => $phone];
+    }
+
+    /**
+     * I recapiti di un referente per un'azienda, ripuliti: righe come quelle
+     * del riquadro «Contatti» (`kind`, `email` oppure `phone_prefix` + `phone`,
+     * o `value`). Le righe vuote o non valide si scartano, i doppioni pure.
+     *
+     * @return list<array{kind: string, value: string, phone_prefix: string, label: string}>
+     */
+    public static function cleanPoints(mixed $rows): array
+    {
+        return ContactPoints::cleanBox(is_array($rows) ? array_values($rows) : [])[0];
+    }
+
+    /**
+     * La prima email e il primo telefono (di qualunque tipo) di una lista di
+     * recapiti, per le colonne del legame.
+     *
+     * @param list<array<string, mixed>> $points righe `kind`, `value`, `phone_prefix`
+     * @return array{email: string, phone_prefix: string, phone: string}
+     */
+    public static function mirror(array $points): array
+    {
+        $out = ['email' => '', 'phone_prefix' => '', 'phone' => ''];
+
+        foreach ($points as $point) {
+            if (($point['kind'] ?? '') === ContactPoints::EMAIL) {
+                if ($out['email'] === '') {
+                    $out['email'] = (string) ($point['value'] ?? '');
+                }
+            } elseif ($out['phone'] === '' && ContactPoints::isPhone($point['kind'] ?? null)) {
+                $out['phone_prefix'] = (string) ($point['phone_prefix'] ?? '');
+                $out['phone'] = (string) ($point['value'] ?? '');
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Un flag della riga: quello postato se la chiave c'è, altrimenti quello
+     * salvato di un legame vivo, o `'true'` per uno nuovo.
+     *
+     * @param array<string, mixed>|null $live la riga salvata, se il legame è vivo
+     */
+    private static function storedFlag(array $row, string $key, ?array $live): string
+    {
+        if (array_key_exists($key, $row)) {
+            return self::flag($row[$key]);
+        }
+
+        return $live === null ? 'true' : self::flag($live[$key] ?? 'false');
     }
 
     /** `'true'` o `'false'` da quello che arriva da un select, un checkbox o un booleano. */
@@ -302,6 +375,50 @@ final class ContactRelations
         }
 
         return $out;
+    }
+
+    /** La prima area nota di una lista, o vuoto: l'ufficio che mostra un form a scelta singola. */
+    public static function firstDepartment(mixed $departments): string
+    {
+        return self::cleanDepartments($departments)[0] ?? '';
+    }
+
+    /**
+     * Le aree da salvare quando il form ne sceglie una sola. Se è la stessa
+     * che mostrava (la prima nota di `$stored`) le aree salvate restano
+     * tutte: chi aveva più uffici non li perde salvando senza toccarli. Se è
+     * un'altra, o vuota, sostituisce tutto.
+     *
+     * @param list<string> $stored le aree salvate oggi, nell'ordine
+     * @return list<string>
+     */
+    public static function singleDepartment(mixed $posted, array $stored = []): array
+    {
+        $stored = array_values(array_map('strval', $stored));
+        $posted = self::department($posted);
+
+        if ($posted === self::firstDepartment($stored)) {
+            return $stored;
+        }
+
+        return $posted === '' ? [] : [$posted];
+    }
+
+    /**
+     * Chi ha queste aree risponde per quella (o per una di quelle) chiesta?
+     * Sì se non si chiede un'area, se non ne ha nessuna, se ha «Generale»
+     * (`GENERAL`) o se ne ha una fra quelle chieste. È la regola unica di
+     * referenti e recapiti.
+     *
+     * @param list<string> $stored
+     * @param string|list<string> $wanted
+     */
+    public static function coversDepartment(array $stored, string|array $wanted): bool
+    {
+        $wanted = array_values(array_filter(array_map(static fn (mixed $value): string => trim((string) $value), (array) $wanted), static fn (string $value): bool => $value !== ''));
+        $stored = array_map('strval', $stored);
+
+        return $wanted === [] || $stored === [] || in_array(self::GENERAL, $stored, true) || array_intersect($wanted, $stored) !== [];
     }
 
     /** L'etichetta di un'area; vuota se non c'è. */
@@ -390,11 +507,80 @@ final class ContactRelations
     }
 
     /**
+     * I recapiti dei legami dati per l'azienda, per id del legame: quelli
+     * salvati in `contact_relation_points`, nell'ordine scelto; per un legame
+     * che non ne ha, l'email e il telefono delle sue colonne (i legami di
+     * prima non si ricopiano: si leggono così).
+     *
+     * @param list<array<string, mixed>> $relations righe di `contact_relations`
+     * @return array<int, list<array{kind: string, value: string, phone_prefix: string, label: string}>>
+     */
+    public static function pointsByRelation(array $relations): array
+    {
+        $byId = [];
+
+        foreach ($relations as $relation) {
+            if (is_array($relation) && (int) ($relation['id'] ?? 0) > 0) {
+                $byId[(int) $relation['id']] = $relation;
+            }
+        }
+
+        try {
+            $stored = self::storedPoints(array_keys($byId));
+        } catch (\Throwable) {
+            // Tabella non ancora creata: valgono le colonne del legame.
+            $stored = [];
+        }
+
+        $out = [];
+
+        foreach ($byId as $id => $relation) {
+            $out[$id] = $stored[$id] ?? self::fallbackPoints($relation);
+        }
+
+        return $out;
+    }
+
+    /**
+     * I recapiti di un legame (vedi `pointsByRelation()`).
+     *
+     * @return list<array{kind: string, value: string, phone_prefix: string, label: string}>
+     */
+    public static function pointsOf(int $relationId): array
+    {
+        $relation = $relationId > 0 ? ContactRelation::findById($relationId) : null;
+
+        return is_array($relation) && isset($relation['id']) ? self::pointsByRelation([$relation])[$relationId] ?? [] : [];
+    }
+
+    /**
+     * Le righe dei legami con `points` nella forma del riquadro «Contatti»
+     * (`kind`, `email` oppure `phone_prefix` + `phone`, `label`), per il
+     * ripetitore dei recapiti del referente. Una riga che porta già `points`
+     * (un POST rifiutato) resta com'è.
+     *
+     * @param list<array<string, mixed>> $rows righe di `contact_relations`
+     * @return list<array<string, mixed>>
+     */
+    public static function withPoints(array $rows): array
+    {
+        $points = self::pointsByRelation(array_values(array_filter($rows, static fn (mixed $row): bool => is_array($row) && !array_key_exists('points', $row))));
+
+        foreach ($rows as $key => $row) {
+            if (is_array($row) && !array_key_exists('points', $row)) {
+                $rows[$key]['points'] = ContactPoints::formRows($points[(int) ($row['id'] ?? 0)] ?? [], false);
+            }
+        }
+
+        return $rows;
+    }
+
+    /**
      * A chi scrivere per un'area e un brand: i referenti vivi che si occupano
-     * di quell'area o di tutte e seguono quel brand o tutti, con la scheda
-     * sotto `contact`; il principale per primo, poi nell'ordine scelto. È il
-     * punto unico da cui i moduli scelgono i destinatari di un documento
-     * (`receives_documents` è nella riga: lo filtra chi manda documenti).
+     * di quell'area o di tutte (nessuna area o «Generale») e seguono quel
+     * brand o tutti, con la scheda sotto `contact`, nell'ordine della scheda
+     * («Principale» non conta più: nei form non si sceglie). È il punto unico da cui i moduli scelgono i
+     * destinatari di un documento.
      * Area vuota = qualunque area; brand 0 = qualunque brand.
      *
      * @return list<array<string, mixed>>
@@ -407,19 +593,16 @@ final class ContactRelations
         if ($department !== '') {
             $rows = array_values(array_filter(
                 $rows,
-                static fn (array $row): bool => $row['departments'] === [] || in_array($department, $row['departments'], true)
+                static fn (array $row): bool => self::coversDepartment($row['departments'], $department)
             ));
         }
-
-        // usort è stabile: fra i non principali resta l'ordine del repeater.
-        usort($rows, static fn (array $a, array $b): int => (($b['is_primary'] ?? 'false') === 'true') <=> (($a['is_primary'] ?? 'false') === 'true'));
 
         return $rows;
     }
 
     /**
      * I referenti di un'azienda che si occupano di almeno una di queste aree
-     * o di tutte (nessuna area), con la scheda sotto `contact`.
+     * o di tutte (nessuna area o «Generale»), con la scheda sotto `contact`.
      *
      * @param string|list<string> $departments
      * @return list<array<string, mixed>>
@@ -430,7 +613,7 @@ final class ContactRelations
 
         return array_values(array_filter(
             self::peopleOf($companyId),
-            static fn (array $row): bool => $row['departments'] === [] || array_intersect($wanted, $row['departments']) !== []
+            static fn (array $row): bool => $row['departments'] === [] || in_array(self::GENERAL, $row['departments'], true) || array_intersect($wanted, $row['departments']) !== []
         ));
     }
 
@@ -450,10 +633,11 @@ final class ContactRelations
     /**
      * I referenti di un'azienda, in ordine: ogni riga del legame con la
      * scheda della persona sotto `contact` e le aree in `departments`
-     * (vuota = tutte; `department` è la prima, per chi leggeva il reparto).
+     * (vuota = tutte; `department` è la prima nota, l'ufficio dei form).
      * I contatti di lavoro sono in `work_email`, `work_phone_prefix`,
      * `work_phone`; `contact_email` è l'email a cui scrivergli per
-     * quest'azienda (di lavoro se c'è, altrimenti la sua).
+     * quest'azienda (di lavoro se c'è, altrimenti la sua). `points` sono
+     * tutti i suoi recapiti per l'azienda (`pointsByRelation()`).
      *
      * @param int $brandId se c'è, solo chi segue quel brand o tutti i brand
      * @return list<array<string, mixed>>
@@ -665,7 +849,8 @@ final class ContactRelations
      * ripassare né toccare gli altri legami dell'una o dell'altra (la
      * creazione rapida). `$values` come una riga di `sync()` (`job_title`,
      * `is_primary`, `receives_documents`, `access`, `departments`, `brand_ids`,
-     * `email`, `phone_prefix`, `phone`); `access` è `none` se non c'è, e passa da `useAccessGuard()`. Un legame
+     * `email`, `phone_prefix`, `phone` oppure `points`); `access` è `none` se
+     * non c'è (qui non nasce `buyer`), e passa da `useAccessGuard()`. Un legame
      * già vivo non cambia: per modificarlo c'è `sync()`. Stessa transazione e
      * stessi eventi di `sync()` (`contact.linked` dopo il commit). Non applica
      * il filtro delle controparti: chi chiama sa già che le due schede si vedono.
@@ -708,12 +893,21 @@ final class ContactRelations
                 throw new \RuntimeException('Legame azienda/persona non salvato.');
             }
 
-            if ($clean['is_primary'] === 'true') {
+            // Gli altri principali decadono solo se lo chiede chi chiama.
+            if (array_key_exists('is_primary', $values) && $clean['is_primary'] === 'true') {
                 self::demoteOtherPrimaries($companyId, $personId);
             }
 
-            if (array_key_exists('departments', $values) || array_key_exists('department', $values)) {
-                self::writeDepartments($id, self::cleanDepartments($values['departments'] ?? $values['department'] ?? []));
+            if (array_key_exists('departments', $values)) {
+                self::writeDepartments($id, self::cleanDepartments($values['departments']));
+            } elseif (array_key_exists('department', $values)) {
+                self::writeDepartments($id, self::singleDepartment($values['department'], self::departmentsOf($id)));
+            }
+
+            if (array_key_exists('points', $values)) {
+                self::writePoints($id, self::cleanPoints($values['points']));
+            } else {
+                self::alignPoints($id);
             }
 
             $relation = ContactRelation::findById($id);
@@ -828,8 +1022,18 @@ final class ContactRelations
      * `job_title`, `departments`, `is_primary`, `receives_documents`, `access`, `brand_ids`,
      * i contatti di lavoro `email`, `phone_prefix`, `phone` (vedi `workContacts()`); dal lato azienda anche
      * `new_name`, `new_surname`, `new_email` per creare la persona). Le righe non
-     * presenti si cancellano (soft delete). Una riga senza `departments` (o
-     * senza il vecchio `department`) tiene le aree di prima, come `brand_ids`.
+     * presenti si cancellano (soft delete). Una riga senza `departments` né
+     * `department` tiene le aree di prima, come `brand_ids`. `departments`
+     * (lista) le sostituisce; `department` (un valore, il form a scelta
+     * singola) segue `singleDepartment()`: lo stesso ufficio di prima non
+     * toglie gli altri salvati, uno diverso li sostituisce.
+     *
+     * `points` è la lista dei recapiti del referente per l'azienda, righe
+     * `kind` (`ContactPoints::kinds()`), `email` oppure `phone_prefix` +
+     * `phone` (o `value`), `label`: sostituisce quelli salvati, e la prima
+     * email e il primo telefono vanno sulle colonne del legame. Senza
+     * `points` valgono `email`, `phone_prefix`, `phone` e gli altri recapiti
+     * salvati restano. I flag non postati restano com'erano (`normalize()`).
      * I legami, i brand e le aree si scrivono in una transazione; gli eventi
      * `ContactEvents::LINKED` e `UNLINKED` partono dopo il commit. `CREATED`
      * parte per le persone nuove, create prima dei legami.
@@ -854,6 +1058,7 @@ final class ContactRelations
         // Brand seguiti e aree non sono colonne del legame: si scrivono dopo, solo per le righe che li portano.
         $brands = [];
         $areas = [];
+        $points = [];
 
         foreach ($rows as $row) {
             $counterpartId = self::id($row[$other] ?? 0);
@@ -867,13 +1072,20 @@ final class ContactRelations
             }
 
             // `department` (un valore) è la forma di prima: vale ancora per un'API o un import vecchi.
+            // `departments` è la lista intera; `department` l'ufficio unico del form.
             if (!isset($areas[$counterpartId]) && (array_key_exists('departments', $row) || array_key_exists('department', $row))) {
-                $areas[$counterpartId] = self::cleanDepartments($row['departments'] ?? $row['department'] ?? []);
+                $areas[$counterpartId] = array_key_exists('departments', $row)
+                    ? [false, self::cleanDepartments($row['departments'])]
+                    : [true, $row['department']];
+            }
+
+            if (!isset($points[$counterpartId]) && array_key_exists('points', $row)) {
+                $points[$counterpartId] = self::cleanPoints($row['points']);
             }
         }
 
         // Gli eventi partono dopo il commit: un ascoltatore non vede scritture poi annullate.
-        [$summary, $events] = Transaction::run(static fn (): array => self::writeRelations($parentColumn, $parentId, $rows, $brands, $areas));
+        [$summary, $events] = Transaction::run(static fn (): array => self::writeRelations($parentColumn, $parentId, $rows, $brands, $areas, $points));
 
         foreach ($events as [$event, $payload]) {
             ContactEvents::dispatch($event, $payload);
@@ -887,12 +1099,22 @@ final class ContactRelations
      *
      * @param list<array<string, mixed>> $rows
      * @param array<int, list<int|string>> $brands controparte => brand seguiti
-     * @param array<int, list<string>> $areas controparte => aree
+     * @param array<int, array{0: bool, 1: mixed}> $areas controparte => [scelta singola?, aree o ufficio]
+     * @param array<int, list<array<string, string>>> $points controparte => recapiti ripuliti
      * @return array{0: array<string, mixed>, 1: list<array{0: string, 1: array<string, mixed>}>} il riepilogo e gli eventi da emettere
      */
-    private static function writeRelations(string $parentColumn, int $parentId, array $rows, array $brands, array $areas): array
+    private static function writeRelations(string $parentColumn, int $parentId, array $rows, array $brands, array $areas, array $points = []): array
     {
         $other = self::counterpart($parentColumn);
+        // Chi posta `is_primary`: solo per loro vale la regola del principale unico.
+        $asksPrimary = [];
+
+        foreach ($rows as $row) {
+            if (array_key_exists('is_primary', $row)) {
+                $asksPrimary[self::id($row[$other] ?? 0)] = true;
+            }
+        }
+
         $before = self::liveByCounterpart($parentColumn, $parentId);
         $valid = self::existingCounterparts($parentColumn, array_map(static fn (array $row): int => self::id($row[$other] ?? 0), $rows), $parentId);
         $clean = self::normalize($rows, self::allRowsOf($parentColumn, $parentId), $parentColumn, $parentId, $valid);
@@ -908,14 +1130,14 @@ final class ContactRelations
                 if (isset($readonly[$counterpartId], $before[$counterpartId])) {
                     $clean[$i] = self::storedClean($before[$counterpartId], $other);
                     $primaryKept = $primaryKept || $clean[$i]['is_primary'] === 'true';
-                    unset($brands[$counterpartId], $areas[$counterpartId]);
+                    unset($brands[$counterpartId], $areas[$counterpartId], $points[$counterpartId]);
                 }
             }
 
             // Dal lato azienda un principale salvato e non visibile tiene il titolo.
             if ($primaryKept && $parentColumn === self::COMPANY) {
                 foreach ($clean as $i => $row) {
-                    if (!isset($readonly[(int) $row[$other]])) {
+                    if (!isset($readonly[(int) $row[$other]]) && isset($asksPrimary[(int) $row[$other]])) {
                         $clean[$i]['is_primary'] = 'false';
                     }
                 }
@@ -930,7 +1152,7 @@ final class ContactRelations
 
         if ($parentColumn === self::PERSON) {
             foreach ($clean as $row) {
-                if ($row['is_primary'] === 'true' && !isset($readonly[(int) $row[self::COMPANY]])) {
+                if ($row['is_primary'] === 'true' && isset($asksPrimary[(int) $row[self::COMPANY]]) && !isset($readonly[(int) $row[self::COMPANY]])) {
                     self::demoteOtherPrimaries((int) $row[self::COMPANY], $parentId);
                 }
             }
@@ -950,9 +1172,19 @@ final class ContactRelations
             }
         }
 
-        foreach ($areas as $counterpartId => $departments) {
+        foreach ($areas as $counterpartId => [$single, $departments]) {
             if (isset($after[$counterpartId])) {
-                self::writeDepartments((int) $after[$counterpartId]['id'], $departments);
+                $relationId = (int) $after[$counterpartId]['id'];
+                self::writeDepartments($relationId, $single ? self::singleDepartment($departments, self::departmentsOf($relationId)) : $departments);
+            }
+        }
+
+        foreach ($after as $counterpartId => $row) {
+            if (isset($points[$counterpartId])) {
+                self::writePoints((int) $row['id'], $points[$counterpartId]);
+            } elseif (!isset($readonly[$counterpartId])) {
+                // Senza `points` i campi singoli sono il primo recapito: gli altri salvati restano.
+                self::alignPoints((int) $row['id']);
             }
         }
 
@@ -1044,6 +1276,160 @@ final class ContactRelations
         }
 
         return $departments;
+    }
+
+    /**
+     * I recapiti di un legame, dentro la transazione di chi chiama.
+     *
+     * @param list<array{kind: string, value: string, phone_prefix: string, label: string}> $wanted
+     */
+    private static function writePoints(int $relationId, array $wanted): void
+    {
+        $current = [];
+
+        foreach (self::rows(ContactRelationPoint::find(['relation_id' => $relationId])) as $row) {
+            $current[$row['kind'].'|'.$row['value']] = (int) $row['id'];
+        }
+
+        foreach (array_values($wanted) as $position => $row) {
+            $values = [
+                'kind' => (string) $row['kind'],
+                'value' => (string) $row['value'],
+                'phone_prefix' => (string) ($row['phone_prefix'] ?? ''),
+                'label' => (string) ($row['label'] ?? ''),
+                'position' => $position,
+            ];
+            $key = $values['kind'].'|'.$values['value'];
+            $id = $current[$key] ?? 0;
+            unset($current[$key]);
+
+            $result = $id > 0
+                ? ContactRelationPoint::query()->Update(ContactRelationPoint::$table, $values, 'id', $id)
+                : ContactRelationPoint::create(['relation_id' => $relationId] + $values);
+
+            if (!($result->success ?? false)) {
+                throw new \RuntimeException('Recapito del referente non salvato.');
+            }
+        }
+
+        foreach ($current as $id) {
+            ContactRelationPoint::delete($id);
+        }
+    }
+
+    /**
+     * Dopo una scrittura con i campi singoli: se il legame ha recapiti
+     * salvati, la prima email e il primo telefono prendono i valori delle
+     * colonne (o spariscono se vuoti) e gli altri restano; poi le colonne
+     * tornano a essere il primo recapito di ogni famiglia. Senza recapiti
+     * salvati non fa nulla: bastano le colonne.
+     */
+    private static function alignPoints(int $relationId): void
+    {
+        try {
+            $stored = self::storedPoints([$relationId])[$relationId] ?? [];
+        } catch (\Throwable) {
+            // Tabella non ancora creata: valgono le colonne del legame.
+            return;
+        }
+
+        $relation = $stored === [] ? null : ContactRelation::findById($relationId);
+
+        if (!is_array($relation) || !isset($relation['id'])) {
+            return;
+        }
+
+        $columns = self::fallbackPoints($relation);
+        $list = [];
+        $done = ['email' => false, 'phone' => false];
+
+        foreach ($stored as $point) {
+            $family = ContactPoints::family($point['kind']);
+
+            if (!$done[$family]) {
+                $done[$family] = true;
+                $first = array_values(array_filter($columns, static fn (array $row): bool => ContactPoints::family($row['kind']) === $family))[0] ?? null;
+
+                if ($first === null) {
+                    continue;
+                }
+
+                // Il tipo (fisso, cellulare, WhatsApp) e l'etichetta restano quelli salvati.
+                $point = ['value' => $first['value'], 'phone_prefix' => $first['phone_prefix']] + $point;
+            }
+
+            $list[] = $point;
+        }
+
+        // Una famiglia senza recapiti salvati entra per prima.
+        foreach (array_reverse($columns) as $row) {
+            if (!$done[ContactPoints::family($row['kind'])]) {
+                array_unshift($list, $row);
+            }
+        }
+
+        $unique = [];
+
+        foreach ($list as $point) {
+            $unique[$point['kind'].'|'.$point['value']] ??= $point;
+        }
+
+        $list = array_values($unique);
+        self::writePoints($relationId, $list);
+        $mirror = self::mirror($list);
+
+        if ($mirror != array_intersect_key(array_map('strval', $relation), $mirror)) {
+            ContactRelation::query()->Update(ContactRelation::$table, $mirror, 'id', $relationId);
+        }
+    }
+
+    /**
+     * I recapiti salvati dei legami dati, per legame, nell'ordine scelto.
+     *
+     * @param list<int> $relationIds
+     * @return array<int, list<array{kind: string, value: string, phone_prefix: string, label: string}>>
+     */
+    private static function storedPoints(array $relationIds): array
+    {
+        $relationIds = array_values(array_unique(array_filter(array_map('intval', $relationIds), static fn (int $id): bool => $id > 0)));
+        $out = [];
+
+        if ($relationIds === []) {
+            return $out;
+        }
+
+        foreach (self::rows(ContactRelationPoint::find(['relation_id' => $relationIds], null, 'position', 'ASC')) as $row) {
+            $out[(int) $row['relation_id']][] = [
+                'kind' => (string) ($row['kind'] ?? ''),
+                'value' => (string) ($row['value'] ?? ''),
+                'phone_prefix' => (string) ($row['phone_prefix'] ?? ''),
+                'label' => (string) ($row['label'] ?? ''),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * I recapiti di un legame che non ne ha di salvati: l'email e il telefono
+     * delle sue colonne.
+     *
+     * @param array<string, mixed> $relation
+     * @return list<array{kind: string, value: string, phone_prefix: string, label: string}>
+     */
+    private static function fallbackPoints(array $relation): array
+    {
+        $out = [];
+
+        if ((string) ($relation['email'] ?? '') !== '') {
+            $out[] = ['kind' => ContactPoints::EMAIL, 'value' => (string) $relation['email'], 'phone_prefix' => '', 'label' => ''];
+        }
+
+        if ((string) ($relation['phone'] ?? '') !== '') {
+            $out[] = ['kind' => ContactPoints::PHONE, 'value' => (string) $relation['phone'], 'phone_prefix' => (string) ($relation['phone_prefix'] ?? ''), 'label' => ''];
+        }
+
+        return $out;
     }
 
     /**
@@ -1165,6 +1551,7 @@ final class ContactRelations
         $key = $parentColumn === self::COMPANY ? 'contact' : 'company';
         $relations = self::rows(ContactRelation::find([$parentColumn => $parentId], null, 'position', 'ASC'));
         $areas = self::departmentsByRelation(array_map(static fn (array $row): int => (int) $row['id'], $relations));
+        $points = self::pointsByRelation($relations);
         // Dal lato della persona l'email di ripiego è la sua: si legge una volta.
         $person = $parentColumn === self::PERSON && $relations !== [] ? Contact::findById($parentId) : null;
         $out = [];
@@ -1175,7 +1562,7 @@ final class ContactRelations
             if (is_array($record) && isset($record['id'])) {
                 $departments = $areas[(int) $row['id']] ?? [];
                 $personEmail = (string) (($parentColumn === self::COMPANY ? $record : $person)['email'] ?? '');
-                $out[] = ['departments' => $departments, 'department' => $departments[0] ?? ''] + self::workFields($row, $personEmail) + $row + [$key => $record];
+                $out[] = ['departments' => $departments, 'department' => self::firstDepartment($departments), 'points' => $points[(int) $row['id']] ?? []] + self::workFields($row, $personEmail) + $row + [$key => $record];
             }
         }
 

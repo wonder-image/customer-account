@@ -5,6 +5,9 @@ declare(strict_types=1);
 require __DIR__.'/support/FakeDb.php';
 require __DIR__.'/bootstrap.php';
 
+// Il riquadro a righe è quello con il CRM acceso (spento: un'email e un telefono soli, vedi CrmContactsTest).
+\Wonder\Plugin\CustomerAccount\Support\Crm::enable();
+
 // Gli helper globali che Repeater::syncRelatedRows() usa, sopra il FakeDb.
 if (!function_exists('sqlSelect')) {
     function sqlSelect($table, $condition = null, $limit = null, $order = null, $orderDirection = null, $attributes = '*') { return (new \Wonder\Sql\Query)->Select($table, $condition, $limit, $order, $orderDirection, $attributes); }
@@ -189,9 +192,9 @@ check('form: righe del riquadro dalle colonne e dalla tabella; la scrittura pass
     ]]);
 
     return $form['contact_points'] === [
-        ['kind' => 'email', 'email' => 'anna@rossi.test', 'phone_prefix' => '', 'phone' => '', 'label' => '', 'is_primary' => 'true', 'locked' => '', 'departments' => []],
-        ['kind' => 'phone', 'email' => '', 'phone_prefix' => '+39', 'phone' => '3331112222', 'label' => '', 'is_primary' => 'true', 'locked' => '', 'departments' => []],
-        ['kind' => 'phone', 'email' => '', 'phone_prefix' => '+39', 'phone' => '021234567', 'label' => 'work', 'is_primary' => 'false', 'locked' => '', 'departments' => []],
+        ['kind' => 'email', 'email' => 'anna@rossi.test', 'phone_prefix' => '', 'phone' => '', 'label' => '', 'is_primary' => 'true', 'locked' => '', 'access' => '1', 'departments' => [], 'department' => ''],
+        ['kind' => 'phone', 'email' => '', 'phone_prefix' => '+39', 'phone' => '3331112222', 'label' => '', 'is_primary' => 'true', 'locked' => '', 'access' => '', 'departments' => [], 'department' => ''],
+        ['kind' => 'phone', 'email' => '', 'phone_prefix' => '+39', 'phone' => '021234567', 'label' => 'work', 'is_primary' => 'false', 'locked' => '', 'access' => '', 'departments' => [], 'department' => ''],
     ]
         && Query::$tables['contacts'][2]['email'] === '' && Query::$tables['contacts'][2]['phone'] === '021234567'
         && ContactPoints::of(ContactPoints::CONTACT, 2) === [];
@@ -220,7 +223,7 @@ check('email di accesso: riga bloccata con etichetta access; un\'altra email non
     // Bob si registra: la sua email è una riga in più della scheda di Ada, che non si aggancia.
     $bob = ContactAccount::link(8);
 
-    return $rows === [['kind' => 'email', 'value' => 'ada@example.com', 'phone_prefix' => '', 'label' => 'access', 'is_primary' => true, 'locked' => true, 'departments' => []]]
+    return $rows === [['kind' => 'email', 'value' => 'ada@example.com', 'phone_prefix' => '', 'label' => 'access', 'is_primary' => true, 'locked' => true, 'access' => true, 'departments' => [], 'department' => '']]
         && !array_key_exists('email', $values) && !array_key_exists('user_id', $values)
         && $ada['email'] === 'ada@example.com' && (int) $ada['user_id'] === 7
         && array_column($after, 'value') === ['ada@example.com', 'bob@example.com', 'ada.lavoro@example.com']
@@ -344,7 +347,7 @@ check('andata e ritorno: salvare il riquadro com\'è non cambia né la scheda n�
         && [$card('contacts', 2), ContactPoints::of(ContactPoints::CONTACT, 2)] === $person;
 });
 
-check('Resource: riquadro con «Tipo ufficio» su persone e aziende, senza «Principale» né etichetta; script del modulo nel layout', function () {
+check('Resource: riquadro con l\'«Ufficio» (uno solo) su persone e aziende, senza «Principale» né etichetta; script del modulo nel layout', function () {
     $columns = static function (string $resource): array {
         foreach ($resource::formSchema() as $field) {
             if ($field->name === 'contact_points') {
@@ -356,8 +359,9 @@ check('Resource: riquadro con «Tipo ufficio» su persone e aziende, senza «Pri
     };
     $script = ContactFormScript::html();
 
-    return $columns(ContactResource::class) === ['kind', 'email', 'phone_prefix', 'phone', 'departments', 'locked']
-        && $columns(CompanyResource::class) === ['kind', 'email', 'phone_prefix', 'phone', 'departments', 'locked']
+    // L'ufficio è uno solo per riga: si posta `department`.
+    return $columns(ContactResource::class) === ['kind', 'email', 'phone_prefix', 'phone', 'department', 'locked']
+        && $columns(CompanyResource::class) === ['kind', 'email', 'phone_prefix', 'phone', 'department', 'locked']
         && str_starts_with($script, '<script>') && substr_count($script, '</script>') === 1 && str_contains($script, 'caContactForm')
         && str_contains($script, 'data-ca-point-kind') && ContactResource::usesContactBox() && CompanyResource::usesContactBox();
 });

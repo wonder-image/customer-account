@@ -52,6 +52,8 @@ class Contact extends Model
             Column::key('birth_date')->date(),
             ...static::billing()->tableSchema(),
             Column::key('user_id')->int(),
+            // I social della persona: JSON già validato da `Support\Socials`.
+            Column::key('socials')->type('TEXT'),
             ...static::partyColumns(),
         ];
     }
@@ -71,6 +73,7 @@ class Contact extends Model
             ...static::billing()->dataSchema(),
             Field::key('birth_date')->date(),
             Field::key('user_id')->number()->decimals(0),
+            Field::key('socials')->text()->sanitize(false),
             ...static::partyFields(),
         ];
     }

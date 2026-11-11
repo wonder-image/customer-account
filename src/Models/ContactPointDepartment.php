@@ -31,7 +31,7 @@ class ContactPointDepartment extends Model
     {
         return [
             Column::key('contact_id')->int()->null(false)->foreign(Contact::$table),
-            Column::key('kind')->enum(['email', 'phone'])->default('email'),
+            Column::key('kind')->enum(['email', 'phone', 'mobile', 'whatsapp'])->default('email'),
             Column::key('value')->length(190)->null(false),
             Column::key('department')->length(40)->null(false),
         ];

@@ -108,7 +108,7 @@ check('accessOf e companiesOf filtrano per accesso', function () use ($tables) {
         && count(ContactRelations::companiesOf(2)) === 2;
 });
 
-check('createPerson: senza email sua prende quella di lavoro della riga; i campi stanno solo lato azienda', function () use ($tables) {
+check('createPerson: senza email sua prende quella di lavoro della riga; il form non ha più i campi della persona nuova', function () use ($tables) {
     Query::reset($tables());
     $row = ContactRelations::createPerson(['person_id' => '', 'new_name' => 'Marta', 'email' => ' Marta@Rossi.test ']);
     $own = ContactRelations::createPerson(['person_id' => '', 'new_name' => 'Lia', 'new_email' => 'lia@example.test', 'email' => 'ufficio@rossi.test']);
@@ -121,8 +121,9 @@ check('createPerson: senza email sua prende quella di lavoro della riga; i campi
 
     return (Query::$tables['contacts'][$row['person_id']]['email'] ?? '') === 'marta@rossi.test'
         && (Query::$tables['contacts'][$own['person_id']]['email'] ?? '') === 'lia@example.test'
-        && array_slice($people, array_search(ContactRelations::PERSON, $people, true) + 1, 2) === ['new_name', 'new_surname']
-        && !in_array('new_name', $companies, true);
+        && array_slice($people, 0, 4) === ['id', ContactRelations::PERSON, 'job_title', 'department']
+        && array_slice($companies, 0, 4) === ['id', ContactRelations::COMPANY, 'job_title', 'department']
+        && array_intersect(['new_name', 'new_surname', 'new_email', 'is_primary', 'receives_documents', 'access', 'departments'], [...$people, ...$companies]) === [];
 });
 
 check('spenti dai test: nessun campo in più nel form', function () {
@@ -144,7 +145,7 @@ check('sempre accesi: un repeater per lato e il segnaposto', function () use ($t
         && CompanyResource::relationInputName() === CompanyResource::RELATION_PEOPLE;
 });
 
-check('sync dal lato azienda: aggiunge, crea al volo, toglie chi non è più postato', function () use ($tables) {
+check('sync dal lato azienda: aggiunge, scarta la riga senza persona (il form non ne crea), toglie chi non è più postato', function () use ($tables) {
     Query::reset($tables() + ['contact_relations' => [
         1 => ['id' => 1, 'company_id' => 1, 'person_id' => 3, 'is_primary' => 'true', 'receives_documents' => 'false', 'position' => 1, 'deleted' => 'false'],
     ]]);
@@ -161,7 +162,7 @@ check('sync dal lato azienda: aggiunge, crea al volo, toglie chi non è più pos
     $people = array_column(ContactRelations::peopleOf(1), 'person_id');
     $old = Query::$tables['contact_relations'][1];
 
-    return array_map('intval', $people) === [2, 4] && $old['deleted'] === 'true';
+    return array_map('intval', $people) === [2] && $old['deleted'] === 'true' && array_keys(Query::$tables['contacts']) === [2, 3];
 });
 
 check('sync senza segnaposto: le righe restano come sono', function () use ($tables) {
@@ -250,7 +251,7 @@ check('CompanyRecord::from: campi, referenti con accesso, id esterni', function 
     return $record['schema'] === CompanyRecord::SCHEMA && $record['entity'] === 'company'
         && $record['business_name'] === 'Rossi srl' && $record['pi'] === '01234567890' && $record['cap'] === ''
         && $record['is_supplier'] === true && !array_key_exists('name', $record)
-        && $record['relations'] === [['person_id' => 2, 'job_title' => 'Acquisti', 'department' => 'administration', 'departments' => ['administration', 'purchasing'], 'is_primary' => true, 'receives_documents' => true, 'access' => 'admin', 'work_email' => '', 'work_phone_prefix' => '', 'work_phone' => '']]
+        && $record['relations'] === [['person_id' => 2, 'job_title' => 'Acquisti', 'department' => 'administration', 'departments' => ['administration', 'purchasing'], 'is_primary' => true, 'receives_documents' => true, 'access' => 'admin', 'work_email' => '', 'work_phone_prefix' => '', 'work_phone' => '', 'points' => []]]
         && array_column($record['external_ids'], 'external_id') === ['hs-1']
         && json_encode($record) !== false && CompanyRecord::from(99) === null;
 });
@@ -270,7 +271,7 @@ check('ContactRecord::from: persona con aziende e consensi', function () use ($t
 
     return $record['entity'] === 'contact' && $record['name'] === 'Anna' && $record['birth_date'] === '1990-01-02'
         && !array_key_exists('business_name', $record) && $record['user_id'] === 8
-        && $record['relations'] === [['company_id' => 1, 'job_title' => '', 'department' => '', 'departments' => [], 'is_primary' => true, 'receives_documents' => false, 'access' => 'buyer', 'work_email' => '', 'work_phone_prefix' => '', 'work_phone' => '']]
+        && $record['relations'] === [['company_id' => 1, 'job_title' => '', 'department' => '', 'departments' => [], 'is_primary' => true, 'receives_documents' => false, 'access' => 'buyer', 'work_email' => '', 'work_phone_prefix' => '', 'work_phone' => '', 'points' => []]]
         && $record['consents'] === ['newsletter' => 'granted'];
 });
 
@@ -314,7 +315,7 @@ check('aree: lista di base, aggiunta da un modulo, filtro dei referenti con «vu
     $admin = ContactRelations::peopleByDepartment(1, 'administration');
     $both = ContactRelations::peopleByDepartment(1, ['administration', 'marketing']);
 
-    return array_slice($keys, 0, 6) === ['administration', 'purchasing', 'sales', 'technical', 'management', 'other']
+    return array_slice($keys, 0, 7) === ['general', 'administration', 'purchasing', 'sales', 'technical', 'management', 'other']
         && in_array('marketing', $keys, true) && !in_array('no spazi', $keys, true)
         && ContactRelations::department('marketing') === 'marketing' && ContactRelations::department('boss') === ''
         && ContactRelations::department(['x']) === ''
@@ -436,7 +437,7 @@ check('repeater dei referenti: il select multiplo svuotato posta [\'\'] e svuota
     return ContactRelations::brandsOf(1) === [] && Query::$tables['contact_relation_brands'] === [];
 });
 
-check('peopleFor: area o tutte, brand o tutti, il principale per primo; una lettura delle aree', function () use ($brandTables) {
+check('peopleFor: area o tutte, brand o tutti, in ordine di scheda; una lettura delle aree', function () use ($brandTables) {
     $seed = $brandTables();
     $seed['contacts'][5] = ['id' => 5, 'name' => 'Capo', 'surname' => 'Rossi', 'deleted' => 'false'];
     $seed['contact_relations'][3] = ['id' => 3, 'company_id' => 1, 'person_id' => 5, 'is_primary' => 'true', 'position' => 3, 'deleted' => 'false'];
@@ -446,7 +447,7 @@ check('peopleFor: area o tutte, brand o tutti, il principale per primo; una lett
         2 => ['id' => 2, 'relation_id' => 2, 'department' => 'sales', 'deleted' => 'false'],
         3 => ['id' => 3, 'relation_id' => 2, 'department' => 'administration', 'deleted' => 'false'],
     ];
-    // Anna (1) segue solo il brand 2; Luca (2) tutti; il principale (3) si occupa di tutto.
+    // Anna (1) segue solo il brand 2; Luca (2) tutti; il terzo si occupa di tutto. «Principale» non sposta nessuno.
     $seed['contact_relation_brands'] = [1 => ['id' => 1, 'relation_id' => 1, 'brand_id' => 2, 'deleted' => 'false']];
     Query::reset($seed);
     $ids = static fn (array $rows): array => array_map('intval', array_column($rows, 'person_id'));
@@ -454,14 +455,14 @@ check('peopleFor: area o tutte, brand o tutti, il principale per primo; una lett
     $all = ContactRelations::peopleFor(1);
     $reads = count(array_filter(Query::$selects, static fn (array $q): bool => $q['table'] === 'contact_relation_departments'));
 
-    return $ids($all) === [5, 2, 3] && $reads === 1
-        && $ids(ContactRelations::peopleFor(1, 'administration')) === [5, 2, 3]
-        && $ids(ContactRelations::peopleFor(1, 'sales')) === [5, 3]
-        && $ids(ContactRelations::peopleFor(1, 'administration', 1)) === [5, 3]
+    return $ids($all) === [2, 3, 5] && $reads === 1
+        && $ids(ContactRelations::peopleFor(1, 'administration')) === [2, 3, 5]
+        && $ids(ContactRelations::peopleFor(1, 'sales')) === [3, 5]
+        && $ids(ContactRelations::peopleFor(1, 'administration', 1)) === [3, 5]
         && $ids(ContactRelations::peopleFor(1, 'technical', 2)) === [5]
         && $ids(ContactRelations::peopleFor(4, 'sales')) === [2]
         && ContactRelations::peopleFor(0) === [] && ContactRelations::peopleFor(99, 'sales') === []
-        && $all[1]['departments'] === ['administration'] && $all[0]['departments'] === [];
+        && $all[0]['departments'] === ['administration'] && $all[2]['departments'] === [];
 });
 
 check('setDepartments: solo aree note e legami vivi, vuota = tutte', function () use ($brandTables) {
@@ -479,13 +480,13 @@ check('setDepartments: solo aree note e legami vivi, vuota = tutte', function ()
         && Query::$tables['contact_relation_departments'] === [];
 });
 
-check('repeater dei legami: colonna «Si occupa di» multipla su tutti e due i lati, valori nel form', function () use ($brandTables) {
+check('repeater dei legami: «Ufficio» singolo su tutti e due i lati (`department`), valori nel form; da codice `departments` vale ancora', function () use ($brandTables) {
     $seed = $brandTables();
     $seed['contact_relation_departments'] = [1 => ['id' => 1, 'relation_id' => 2, 'department' => 'sales', 'deleted' => 'false']];
     Query::reset($seed);
     $column = static fn (string $resource, string $input) => array_values(array_filter(
         (array) $resource::formFieldsByKey()[$input]->get('context')['columns'],
-        static fn ($c) => $c->name === 'departments'
+        static fn ($c) => $c->name === 'department'
     ))[0] ?? null;
     $people = $column(CompanyResource::class, CompanyResource::RELATION_PEOPLE);
     $companies = $column(ContactResource::class, ContactResource::RELATION_COMPANIES);
@@ -499,11 +500,22 @@ check('repeater dei legami: colonna «Si occupa di» multipla su tutti e due i l
             'row_2' => ['id' => '2', 'person_id' => '3'],
         ],
     ]);
+    $many = ContactRelations::departmentsOf(1);
+    // Il form posta un ufficio solo.
+    CompanyResource::syncRepeaterRelations(1, [
+        CompanyResource::RELATION_MARKER => '1',
+        CompanyResource::RELATION_PEOPLE => [
+            'row_1' => ['id' => '1', 'person_id' => '2', 'department' => 'technical'],
+            'row_2' => ['id' => '2', 'person_id' => '3'],
+        ],
+    ]);
 
-    return $people !== null && $companies !== null && $people->get('multiple') === true && $companies->get('multiple') === true
+    return $people !== null && $companies !== null && $people->get('multiple') !== true && $companies->get('multiple') !== true
         && array_column($form[CompanyResource::RELATION_PEOPLE], 'departments', 'person_id') === [2 => [], 3 => ['sales']]
+        && array_column($form[CompanyResource::RELATION_PEOPLE], 'department', 'person_id') === [2 => ContactRelations::firstDepartment([]), 3 => 'sales']
         && $person[ContactResource::RELATION_COMPANIES][0]['departments'] === ['sales']
-        && ContactRelations::departmentsOf(1) === ['administration', 'technical'] && ContactRelations::departmentsOf(2) === ['sales'];
+        && $many === ['administration', 'technical']
+        && ContactRelations::departmentsOf(1) === ['technical'] && ContactRelations::departmentsOf(2) === ['sales'];
 });
 
 check('sync: un errore annulla legami e aree e non emette eventi', function () use ($tables) {
@@ -692,8 +704,9 @@ check('guardia dell\'accesso: senza permesso non sale oltre quello salvato, scen
     ContactRelations::useAccessGuard(null);
     $free = ContactRelations::normalize([['person_id' => 2, 'access' => 'admin'], ['person_id' => 3]], $existing, 'company_id', 1, [2, 3]);
 
-    return array_column($rows, 'access') === ['buyer', 'none', 'buyer'] && $asked === ['1-2-admin', '1-3-admin', '1-4-buyer']
-        && $down[0]['access'] === 'none' && array_column($free, 'access') === ['admin', 'admin'];
+    // Il legame riaperto senza `access` nasce `buyer` come uno nuovo, non con l'accesso di prima.
+    return array_column($rows, 'access') === ['buyer', 'buyer', 'buyer'] && $asked === ['1-2-admin', '1-3-buyer', '1-4-buyer']
+        && $down[0]['access'] === 'none' && array_column($free, 'access') === ['admin', 'buyer'];
 });
 
 check('valori non scalari dalla richiesta: valgono vuoto, senza errori', function () use ($tables) {

@@ -15,6 +15,8 @@ trait HasPartyColumns
     {
         return [
             Column::key('is_customer')->enum(['true', 'false'])->default('true'),
+            // Il tipo del telefono principale (fisso, cellulare, WhatsApp): vedi `ContactPoints`.
+            Column::key('phone_kind')->length(20)->default('phone'),
             Column::key('note')->type('TEXT'),
             Column::key('custom_data')->json(),
             Column::key('active')->enum(['true', 'false'])->default('true'),
@@ -26,6 +28,7 @@ trait HasPartyColumns
         return [
             Field::key('email')->email(),
             Field::key('is_customer')->text()->sanitize(false),
+            Field::key('phone_kind')->text()->sanitize(false),
             Field::key('color')->text()->sanitize(false),
             Field::key('note')->text(),
             Field::key('custom_data')->json(),

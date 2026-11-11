@@ -195,7 +195,7 @@ check('visibilità ristretta dal lato azienda: il principale non visibile tiene 
     }
     $byPerson = array_column(Query::$tables['contact_relations'], null, 'person_id');
     $filtered = $byPerson[3]['is_primary'] === 'true' && $byPerson[3]['email'] === 'luca@rossi.test' && $byPerson[2]['is_primary'] === 'false';
-    ContactRelations::sync(ContactRelations::COMPANY, 1, [['person_id' => '2', 'is_primary' => 'true'], ['person_id' => '3', 'email' => 'luca.nuova@rossi.test']]);
+    ContactRelations::sync(ContactRelations::COMPANY, 1, [['person_id' => '2', 'is_primary' => 'true'], ['person_id' => '3', 'is_primary' => 'false', 'email' => 'luca.nuova@rossi.test']]);
     $byPerson = array_column(Query::$tables['contact_relations'], null, 'person_id');
 
     return $filtered && $byPerson[3]['email'] === 'luca.nuova@rossi.test' && $byPerson[3]['is_primary'] === 'false' && $byPerson[2]['is_primary'] === 'true';

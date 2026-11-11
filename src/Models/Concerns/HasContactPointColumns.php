@@ -22,7 +22,7 @@ trait HasContactPointColumns
     {
         return [
             Column::key(static::ownerKey())->int()->null(false)->foreign(static::ownerModel()::$table),
-            Column::key('kind')->enum(['email', 'phone'])->default('email'),
+            Column::key('kind')->enum(['email', 'phone', 'mobile', 'whatsapp'])->default('email'),
             Column::key('value')->length(190)->null(false),
             Column::key('phone_prefix')->length(8),
             // Testo e non enum: le etichette si estendono con `ContactPoints::addLabel()`.

@@ -2,7 +2,9 @@
 
 namespace Wonder\Plugin\CustomerAccount\Support;
 
+use InvalidArgumentException;
 use RuntimeException;
+use Wonder\App\Support\GoogleMaps;
 use Wonder\Plugin\CustomerAccount\Models\CompanyAddress;
 use Wonder\Plugin\CustomerAccount\Models\CompanyAddressBrand;
 use Wonder\Sql\Transaction;
@@ -18,6 +20,9 @@ use Wonder\Sql\Transaction;
  */
 final class CompanyAddresses
 {
+    /** I campi di un indirizzo che la scheda del brand mostra e scrive. */
+    public const BRAND_FIELDS = ['label', 'street', 'number', 'cap', 'city', 'province', 'country'];
+
     /**
      * Gli indirizzi vivi di un'azienda con `brand_ids` (vuota = tutti i brand).
      * Con un brand: prima quelli di quel brand, poi quelli che valgono per
@@ -229,6 +234,163 @@ final class CompanyAddresses
                 CompanyAddressBrand::query()->Update(CompanyAddressBrand::$table, ['brand_id' => $intoId], 'id', (int) $row['id']);
             }
         }
+    }
+
+    /**
+     * Gli indirizzi che valgono per un brand, azienda per azienda (quelle
+     * legate oggi al brand): prima quelli che lo elencano, poi quelli per
+     * tutti i brand. Ogni riga porta `company_name` (la ragione sociale) e
+     * `all_brands` (vero se l'indirizzo vale per tutti i brand dell'azienda).
+     * Con `$companyIds` solo le aziende date (chi vede solo alcune aziende).
+     *
+     * @param list<int>|null $companyIds
+     * @return list<array<string, mixed>>
+     */
+    public static function forBrand(int $brandId, ?array $companyIds = null): array
+    {
+        $allowed = $companyIds !== null ? array_flip(array_map('intval', $companyIds)) : null;
+        $out = [];
+
+        foreach (CompanyBrands::companiesOf($brandId) as $company) {
+            $companyId = (int) ($company['id'] ?? 0);
+
+            if ($allowed !== null && !isset($allowed[$companyId])) {
+                continue;
+            }
+
+            foreach (self::addressesFor($companyId, $brandId) as $row) {
+                $row['company_name'] = (string) ($company['business_name'] ?? '');
+                $row['all_brands'] = $row['brand_ids'] === [];
+                $out[] = $row;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * I campi che non vanno nelle righe che `updateFromBrand()` scriverebbe
+     * (vuota = tutto bene): serve a fermare il salvataggio del brand prima
+     * di scrivere.
+     *
+     * @param array<int|string, mixed> $rows
+     * @param list<int>|null $companyIds
+     * @return list<string>
+     */
+    public static function brandProblems(int $brandId, array $rows, ?array $companyIds = null): array
+    {
+        return self::brandChanges($brandId, $rows, $companyIds)[1];
+    }
+
+    /**
+     * Aggiorna dalla scheda del brand gli indirizzi che valgono per lui: solo
+     * le righe di `forBrand()` e solo i campi di `BRAND_FIELDS` (più place ID
+     * e coordinate, se postati). Una riga con un id di un altro brand o di
+     * un'altra azienda si ignora; non crea né elimina indirizzi, non tocca
+     * «Presso», predefinito, ordine né i brand per cui valgono. Una riga che
+     * non va ferma tutto prima di scrivere.
+     *
+     * @param array<int|string, mixed> $rows righe `id` + campi
+     * @param list<int>|null $companyIds
+     * @return list<int> gli indirizzi scritti
+     */
+    public static function updateFromBrand(int $brandId, array $rows, ?array $companyIds = null): array
+    {
+        [$changes, $problems] = self::brandChanges($brandId, $rows, $companyIds);
+
+        if ($problems !== []) {
+            throw new InvalidArgumentException('Indirizzi del brand non validi: '.implode(', ', $problems).'.');
+        }
+
+        if ($changes === []) {
+            return [];
+        }
+
+        return Transaction::run(static function () use ($changes): array {
+            foreach ($changes as $id => $values) {
+                if (!(CompanyAddress::update($values, $id)->success ?? false)) {
+                    throw new RuntimeException('Indirizzo del brand non salvato.');
+                }
+            }
+
+            return array_keys($changes);
+        });
+    }
+
+    /**
+     * @param array<int|string, mixed> $rows
+     * @param list<int>|null $companyIds
+     * @return array{0: array<int, array<string, mixed>>, 1: list<string>} i valori da scrivere per indirizzo e i campi che non vanno
+     */
+    private static function brandChanges(int $brandId, array $rows, ?array $companyIds): array
+    {
+        $stored = [];
+
+        foreach (self::forBrand($brandId, $companyIds) as $row) {
+            $stored[(int) $row['id']] = $row;
+        }
+
+        $changes = [];
+        $problems = [];
+
+        foreach ($rows as $row) {
+            $rawId = is_array($row) ? ($row['id'] ?? null) : null;
+            $id = is_scalar($rawId) && ctype_digit(trim((string) $rawId)) ? (int) trim((string) $rawId) : 0;
+
+            if (!isset($stored[$id]) || isset($changes[$id])) {
+                continue;
+            }
+
+            $values = [];
+
+            foreach (self::BRAND_FIELDS as $field) {
+                if (!array_key_exists($field, $row)) {
+                    continue;
+                }
+
+                if ($row[$field] !== null && !is_scalar($row[$field])) {
+                    $problems[$field] = $field;
+                    continue;
+                }
+
+                $values[$field] = trim((string) $row[$field]);
+            }
+
+            if (mb_strlen($values['label'] ?? '') > 100) {
+                $problems['label'] = 'label';
+            }
+
+            $country = $values['country'] ?? (string) ($stored[$id]['country'] ?? '');
+
+            if (($values['country'] ?? '') !== '' && function_exists('countries') && !array_key_exists($values['country'], countries())) {
+                $problems['country'] = 'country';
+            } elseif (($values['province'] ?? '') !== '' && function_exists('states')) {
+                $states = (array) states($country);
+
+                if ($states !== [] && !array_key_exists($values['province'], $states)) {
+                    $problems['province'] = 'province';
+                }
+            }
+
+            // Place ID e coordinate arrivano dal browser: ripuliti, come nella scheda dell'azienda.
+            if (array_intersect_key($row, array_flip(['place_id', 'lat', 'lng'])) !== []) {
+                $values += GoogleMaps::cleanGeo($row);
+            }
+
+            if ($values === []) {
+                continue;
+            }
+
+            foreach (CompanyAddress::validate($values)->response as $field => $result) {
+                if (!$result->isValid()) {
+                    $problems[(string) $field] = (string) $field;
+                }
+            }
+
+            $changes[$id] = $values;
+        }
+
+        return [$changes, array_values($problems)];
     }
 
     /** @return list<array<string, mixed>> */

@@ -24,6 +24,10 @@ use Wonder\Sql\Transaction;
  * il titolo diventa una riga normale. `of()` e `sync()` lavorano ancora sui
  * soli contatti in più, per chi mostra email e telefono come campi a parte.
  *
+ * I tipi sono quattro (`kinds()`): email, telefono fisso, cellulare e
+ * WhatsApp; i tre telefoni sono una famiglia sola (`isPhone()`, `family()`),
+ * con un solo principale il cui tipo sta in `phone_kind`.
+ *
  * Un contatto non principale è un dato di contatto e basta: non serve mai per
  * l'accesso né per collegare un account (`ContactAccount` guarda solo
  * `contacts.email`). Una persona con un account tiene `contacts.email`: dal
@@ -36,7 +40,14 @@ final class ContactPoints
 
     public const EMAIL = 'email';
     public const PHONE = 'phone';
+    public const MOBILE = 'mobile';
+    public const WHATSAPP = 'whatsapp';
+
+    /** Le due famiglie (email, telefono): gli elenchi per tipo dei form. Tutti i tipi: `kinds()`. */
     public const KINDS = [self::EMAIL, self::PHONE];
+
+    /** I tipi che sono un numero di telefono: stesso prefisso, stessa pulizia. */
+    public const PHONE_KINDS = [self::PHONE, self::MOBILE, self::WHATSAPP];
 
     /** Le etichette di base; altre si aggiungono con `addLabel()`. */
     public const LABELS = ['work', 'personal', 'billing', 'other'];
@@ -55,6 +66,55 @@ final class ContactPoints
             self::COMPANY => CompanyPoint::class,
             default => throw new RuntimeException('Scheda sconosciuta: '.$owner),
         };
+    }
+
+    /**
+     * Tutti i tipi di recapito, nell'ordine dei select.
+     *
+     * @return list<string>
+     */
+    public static function kinds(): array
+    {
+        return [self::EMAIL, ...self::PHONE_KINDS];
+    }
+
+    /** Il tipo è un numero di telefono (fisso, cellulare, WhatsApp)? */
+    public static function isPhone(mixed $kind): bool
+    {
+        return in_array($kind, self::PHONE_KINDS, true);
+    }
+
+    /** La famiglia di un tipo: `email` o `phone` (i tre tipi di telefono). */
+    public static function family(mixed $kind): string
+    {
+        return $kind === self::EMAIL ? self::EMAIL : self::PHONE;
+    }
+
+    /**
+     * I tipi per un select: chiave => etichetta.
+     *
+     * @return array<string, string>
+     */
+    public static function kindOptions(): array
+    {
+        $out = [];
+
+        foreach (self::kinds() as $kind) {
+            $out[$kind] = self::kindLabel($kind);
+        }
+
+        return $out;
+    }
+
+    /** L'etichetta di un tipo («Telefono fisso», «Cellulare», ...); vuota se il tipo non esiste. */
+    public static function kindLabel(mixed $kind): string
+    {
+        if (!in_array($kind, self::kinds(), true)) {
+            return '';
+        }
+
+        // `point_kind_phone` è l'etichetta della colonna del numero: il tipo ha la sua.
+        return (string) __t('contacts.point_kind_'.($kind === self::PHONE ? 'landline' : $kind));
     }
 
     /**
@@ -175,21 +235,51 @@ final class ContactPoints
 
         foreach (self::primaryRows($card) as $row) {
             $isLocked = $row['kind'] === self::EMAIL && $locked !== null;
+            $departments = self::knownDepartments($areas[$row['kind'].'|'.$row['value']] ?? []);
             $out[] = array_diff_key($row, ['valid' => true]) + [
                 'label' => $isLocked ? self::ACCESS_LABEL : '',
                 'is_primary' => true,
                 'locked' => $isLocked,
-                'departments' => self::knownDepartments($areas[$row['kind'].'|'.$row['value']] ?? []),
+                // L'email della scheda di una persona: accesso e predefinita, con o senza account.
+                'access' => $owner === self::CONTACT && $row['kind'] === self::EMAIL,
+                'departments' => $departments,
+                'department' => (string) ($departments[0] ?? ''),
             ];
         }
 
         $points = RequestMemo::remember($model::$table, 'owner:'.$ownerId, static fn (): array => self::of($owner, $ownerId));
 
         foreach ($points as $row) {
-            $out[] = $row + ['is_primary' => false, 'locked' => false, 'departments' => self::knownDepartments($areas[$row['kind'].'|'.$row['value']] ?? [])];
+            $departments = self::knownDepartments($areas[$row['kind'].'|'.$row['value']] ?? []);
+            $out[] = $row + ['is_primary' => false, 'locked' => false, 'access' => false, 'departments' => $departments, 'department' => (string) ($departments[0] ?? '')];
         }
 
         return $out;
+    }
+
+    /**
+     * Le righe di `all()` senza l'email di accesso della persona (`access`):
+     * per i form che la mostrano in un campo a parte.
+     *
+     * @param list<array<string, mixed>> $rows
+     * @return list<array<string, mixed>>
+     */
+    public static function withoutAccess(array $rows): array
+    {
+        return array_values(array_filter($rows, static fn (array $row): bool => empty($row['access'])));
+    }
+
+    /**
+     * Le righe del riquadro per il form (`formRows()`) senza l'email di
+     * accesso: per ogni persona, con o senza account. Per un'azienda sono
+     * tutte le righe.
+     *
+     * @param array<string, mixed>|null $card la scheda, se chi chiama l'ha già letta
+     * @return list<array<string, mixed>>
+     */
+    public static function formRowsWithoutAccess(string $owner, int $ownerId, ?array $card = null, bool $withDepartments = true): array
+    {
+        return self::formRows(self::withoutAccess(self::all($owner, $ownerId, $card)), $withDepartments);
     }
 
     /**
@@ -206,17 +296,20 @@ final class ContactPoints
         foreach ($rows as $row) {
             $email = ($row['kind'] ?? '') === self::EMAIL;
             $form = [
-                'kind' => $email ? self::EMAIL : self::PHONE,
+                'kind' => $email ? self::EMAIL : (self::isPhone($row['kind'] ?? null) ? $row['kind'] : self::PHONE),
                 'email' => $email ? (string) $row['value'] : '',
                 'phone_prefix' => $email ? '' : (string) ($row['phone_prefix'] ?? ''),
                 'phone' => $email ? '' : (string) $row['value'],
                 'label' => (string) ($row['label'] ?? ''),
                 'is_primary' => !empty($row['is_primary']) ? 'true' : 'false',
                 'locked' => !empty($row['locked']) ? '1' : '',
+                'access' => !empty($row['access']) ? '1' : '',
             ];
 
             if ($withDepartments) {
                 $form['departments'] = $row['departments'] ?? [];
+                // L'ufficio singolo: la prima voce.
+                $form['department'] = (string) ($row['department'] ?? ($form['departments'][0] ?? ''));
             }
 
             $out[] = $form;
@@ -279,6 +372,37 @@ final class ContactPoints
     }
 
     /**
+     * Come `clean()`, per righe nella forma del riquadro (`kind`, `email`
+     * oppure `phone` secondo il tipo, o `value`; `phone_prefix`, `label`):
+     * i recapiti di un referente per un'azienda (`ContactRelations::sync()`).
+     * I doppioni si scartano senza problema.
+     *
+     * @param list<mixed> $rows
+     * @return array{0: list<array{kind: string, value: string, phone_prefix: string, label: string}>, 1: list<string>}
+     */
+    public static function cleanBox(array $rows, bool $checkDomain = false): array
+    {
+        $out = [];
+        $problems = [];
+
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            [$clean, $problem] = self::cleanRow(self::boxRow($row), $checkDomain);
+
+            if ($problem !== null) {
+                $problems[] = $problem;
+            } elseif ($clean !== null && !isset($out[$clean['kind'].'|'.$clean['value']])) {
+                $out[$clean['kind'].'|'.$clean['value']] = $clean;
+            }
+        }
+
+        return [array_values($out), $problems];
+    }
+
+    /**
      * Le righe del riquadro «Contatti» (principale compreso) divise fra le
      * colonne della scheda e le righe in più. Una riga ha `kind`, il valore
      * (`email` o `phone`, oppure `value` come le righe di `sync()`),
@@ -304,13 +428,43 @@ final class ContactPoints
      *
      * @param list<mixed> $rows
      * @param array<string, mixed> $card la scheda salvata (`user_id`, `email`); vuota per una scheda nuova
+     * I tre tipi di telefono (`PHONE_KINDS`) sono una famiglia sola: un solo
+     * telefono principale, di un tipo qualsiasi; il suo tipo va in
+     * `phone_kind` (in `columns` solo se cambia). `kept` elenca le famiglie
+     * (`email`, `phone`). Una riga può portare `department` (l'ufficio
+     * singolo, vedi `ContactRelations::singleDepartment()`) al posto di
+     * `departments`.
+     *
+     * `$options`:
+     * - `first_primary`: il principale di ogni famiglia è la prima riga per
+     *   posizione (`is_primary` e il principale di prima non contano);
+     * - `separate_email`: l'email della scheda arriva da un campo a parte
+     *   (true = quella salvata, una stringa = quella postata): come
+     *   l'email bloccata, non entra in `columns`, la sua riga si salta e le
+     *   altre email sono righe normali;
+     * - `primary_only`: contano solo la prima email e il primo telefono
+     *   postati (il form con un'email e un telefono soli); i recapiti in
+     *   più salvati non si toccano (`syncAll()`).
+     *
      * @param list<array<string, mixed>> $saved i contatti in più già salvati della scheda
+     * @param array{first_primary?: bool, separate_email?: bool|string, primary_only?: bool} $options
      * @return array{columns: array<string, string>, rows: list<array<string, mixed>>, problems: list<string>, kept: list<string>}
      */
-    public static function split(string $owner, array $rows, array $card = [], bool $checkDomain = false, array $saved = []): array
+    public static function split(string $owner, array $rows, array $card = [], bool $checkDomain = false, array $saved = [], array $options = []): array
     {
         self::model($owner);
+        $primaryOnly = !empty($options['primary_only']);
+        $firstPrimary = $primaryOnly || !empty($options['first_primary']);
         $locked = self::lockedEmail($owner, $card);
+        $separate = $options['separate_email'] ?? false;
+
+        // L'email a parte vale come quella bloccata: il riquadro non la scrive.
+        if ($locked === null && $separate !== false && $separate !== null && $separate !== '') {
+            $locked = self::email(is_string($separate) ? $separate : ($card['email'] ?? ''));
+        } elseif ($locked === null && $separate === '') {
+            $locked = '';
+        }
+
         $stored = [];
         $extra = [];
 
@@ -322,7 +476,7 @@ final class ContactPoints
         }
 
         foreach (self::primaryRows($card) as $row) {
-            $stored[$row['kind']] = $row;
+            $stored[self::family($row['kind'])] = $row;
         }
 
         $kept = [];
@@ -343,12 +497,12 @@ final class ContactPoints
                 continue;
             }
 
-            $kind = $box['kind'] ?? (str_contains($raw, '@') ? self::EMAIL : self::PHONE);
-            $posted[$kind] = true;
+            $slot = self::family($box['kind'] ?? (str_contains($raw, '@') ? self::EMAIL : self::PHONE));
+            $posted[$slot] = true;
 
             // Il valore storico riportato com'era: si tiene, valido o no.
-            if (isset($stored[$kind]) && !$stored[$kind]['valid'] && self::sameValue($kind, $raw, (string) $stored[$kind]['value'])) {
-                $keep[$kind] = true;
+            if (isset($stored[$slot]) && !$stored[$slot]['valid'] && self::sameValue($slot, $raw, (string) $stored[$slot]['value'])) {
+                $keep[$slot] = true;
                 continue;
             }
 
@@ -381,13 +535,30 @@ final class ContactPoints
             $clean['departments'] = array_key_exists('departments', $row)
                 ? ContactRelations::cleanDepartments($row['departments'])
                 : null;
+
+            // L'ufficio singolo: lo risolve la scrittura, che conosce le voci salvate.
+            if ($clean['departments'] === null && array_key_exists('department', $row)) {
+                $clean['department'] = (string) (ContactRelations::cleanDepartments($row['department'])[0] ?? '');
+            }
+
             $kept[] = $clean;
         }
 
-        foreach ($stored as $kind => $row) {
-            if (!$row['valid'] && !isset($posted[$kind])) {
-                $keep[$kind] = true;
+        foreach ($stored as $slot => $row) {
+            if (!$row['valid'] && !isset($posted[$slot])) {
+                $keep[$slot] = true;
             }
+        }
+
+        if ($primaryOnly) {
+            // Un'email e un telefono soli: le altre righe postate non contano.
+            $firsts = [];
+
+            foreach ($kept as $row) {
+                $firsts[self::family($row['kind'])] ??= $row;
+            }
+
+            $kept = array_values($firsts);
         }
 
         $columns = [];
@@ -397,7 +568,7 @@ final class ContactPoints
             $untouched = isset($keep[$kind]) || ($kind === self::EMAIL && $locked !== null);
 
             foreach ($kept as $i => $row) {
-                if ($row['kind'] !== $kind) {
+                if (self::family($row['kind']) !== $kind) {
                     continue;
                 }
 
@@ -406,7 +577,7 @@ final class ContactPoints
                     continue;
                 }
 
-                if ($row['is_primary'] && $primary === null) {
+                if (($firstPrimary || $row['is_primary']) && $primary === null) {
                     $primary = $i;
                 }
 
@@ -422,25 +593,36 @@ final class ContactPoints
             if ($primary === null) {
                 $first = null;
                 $fresh = null;
+                $same = null;
 
                 foreach ($kept as $i => $row) {
-                    if ($row['kind'] !== $kind) {
+                    if (self::family($row['kind']) !== $kind) {
                         continue;
                     }
 
                     if (isset($stored[$kind]) && $row['value'] === $stored[$kind]['value']) {
-                        $primary = $i;
-                        break;
+                        // Lo stesso numero può stare su due tipi (cellulare e WhatsApp): prima quello del tipo salvato.
+                        if ($row['kind'] === $stored[$kind]['kind']) {
+                            $primary = $i;
+                            break;
+                        }
+
+                        $same ??= $i;
+                        continue;
+                    }
+
+                    if ($same !== null) {
+                        continue;
                     }
 
                     $first ??= $i;
 
-                    if (!isset($extra[$kind.'|'.$row['value']])) {
+                    if (!isset($extra[$row['kind'].'|'.$row['value']])) {
                         $fresh ??= $i;
                     }
                 }
 
-                $primary ??= $fresh ?? (isset($stored[$kind]) ? $first : null);
+                $primary ??= $same ?? $fresh ?? (isset($stored[$kind]) ? $first : null);
             }
 
             if ($primary !== null) {
@@ -458,6 +640,12 @@ final class ContactPoints
                 }
 
                 $columns['phone'] = (string) ($row['value'] ?? '');
+                // Il tipo del telefono principale: si scrive solo se cambia.
+                $phoneKind = (string) ($row['kind'] ?? self::PHONE);
+
+                if ($phoneKind !== self::primaryPhoneKind($card)) {
+                    $columns['phone_kind'] = $phoneKind;
+                }
             }
         }
 
@@ -488,11 +676,18 @@ final class ContactPoints
      * riconosce dal valore, così una riga non può puntare a quella di un'altra
      * scheda.
      *
+     * Con `$primaryOnly` (il form mostra solo un'email e un telefono) non
+     * scrive niente: i contatti in più salvati restano come sono.
+     *
      * @param list<mixed> $rows
      * @return list<array{kind: string, value: string, phone_prefix: string, label: string}> i contatti rimasti
      */
-    public static function sync(string $owner, int $ownerId, array $rows): array
+    public static function sync(string $owner, int $ownerId, array $rows, bool $primaryOnly = false): array
     {
+        if ($primaryOnly) {
+            return self::of($owner, $ownerId);
+        }
+
         $model = self::model($owner);
         $card = $ownerId > 0 ? $model::ownerModel()::findById($ownerId) : null;
 
@@ -520,10 +715,16 @@ final class ContactPoints
      * la scheda); l'email bloccata (`lockedEmail()`) non si tocca mai. Le righe
      * che non passano i controlli si scartano: il form le ha già rifiutate.
      *
+     * `$options` sono quelle di `split()`. Con `primary_only` scrive solo la
+     * prima email e il primo telefono nelle colonne della scheda: i recapiti
+     * in più salvati restano (quello diventato principale non resta due
+     * volte) e un principale tolto non ne promuove uno.
+     *
      * @param list<mixed> $rows
+     * @param array{first_primary?: bool, separate_email?: bool|string, primary_only?: bool} $options
      * @return list<array<string, mixed>> le righe di `all()` dopo la scrittura
      */
-    public static function syncAll(string $owner, int $ownerId, array $rows): array
+    public static function syncAll(string $owner, int $ownerId, array $rows, array $options = []): array
     {
         $model = self::model($owner);
         $ownerModel = $model::ownerModel();
@@ -533,9 +734,12 @@ final class ContactPoints
             return [];
         }
 
-        $split = self::split($owner, $rows, $card, false, self::of($owner, $ownerId));
+        $saved = self::of($owner, $ownerId);
+        $split = self::split($owner, $rows, $card, false, $saved, $options);
+        $primaryOnly = !empty($options['primary_only']);
+        $emailFixed = self::lockedEmail($owner, $card) !== null || !empty($options['separate_email']);
 
-        Transaction::run(static function () use ($owner, $model, $ownerModel, $ownerId, $card, $split): void {
+        Transaction::run(static function () use ($owner, $model, $ownerModel, $ownerId, $card, $split, $saved, $primaryOnly, $emailFixed): void {
             $before = self::currentKeys($owner, $ownerId, $card);
             $changes = array_filter(
                 $split['columns'],
@@ -548,10 +752,27 @@ final class ContactPoints
             }
 
             $others = array_values(array_filter($split['rows'], static fn (array $row): bool => !$row['is_primary']));
-            self::writePoints($model, $ownerId, array_map([self::class, 'shape'], $others));
+            $stay = [];
 
-            $untouched = array_values(array_filter(self::primaryRows($card), static fn (array $row): bool => in_array($row['kind'], $split['kept'], true)));
-            self::writeDepartments($owner, $ownerId, [...$split['rows'], ...$untouched], $before);
+            if ($primaryOnly) {
+                // I recapiti in più salvati restano dove sono, tranne quello salito a principale.
+                $taken = [];
+
+                foreach ($split['rows'] as $row) {
+                    $taken[$row['kind'].'|'.$row['value']] = true;
+                }
+
+                $stay = array_values(array_filter($saved, static fn (array $row): bool => !isset($taken[$row['kind'].'|'.$row['value']])));
+            }
+
+            self::writePoints($model, $ownerId, array_map([self::class, 'shape'], [...$stay, ...$others]));
+
+            // I principali che il riquadro non scrive (valore storico, email a parte) tengono i loro uffici.
+            $untouched = array_values(array_filter(
+                self::primaryRows($card),
+                static fn (array $row): bool => in_array(self::family($row['kind']), $split['kept'], true) || ($row['kind'] === self::EMAIL && $emailFixed)
+            ));
+            self::writeDepartments($owner, $ownerId, [...$split['rows'], ...$untouched, ...$stay], $before);
         });
 
         return self::all($owner, $ownerId);
@@ -559,7 +780,7 @@ final class ContactPoints
 
     /**
      * Le email di un'azienda a cui scrivere per un'area: quelle che se ne
-     * occupano o si occupano di tutto (nessuna area), la principale per
+     * occupano o si occupano di tutto (nessuna area o «Generale»), la principale per
      * prima. Area vuota = tutte le email. Una casella con sole aree non più
      * note (tolte dalla lista) non si occupa di nessuna area: esce solo con
      * l'area vuota. Per i destinatari dei documenti,
@@ -581,7 +802,7 @@ final class ContactPoints
 
             $stored = $areas[$row['kind'].'|'.$row['value']] ?? [];
 
-            if ($department === '' || $stored === [] || in_array($department, $stored, true)) {
+            if (ContactRelations::coversDepartment($stored, $department)) {
                 $out[] = $row['value'];
             }
         }
@@ -704,7 +925,7 @@ final class ContactPoints
             return [null, null];
         }
 
-        $kind = in_array($row['kind'] ?? null, self::KINDS, true) ? $row['kind'] : (str_contains($raw, '@') ? self::EMAIL : self::PHONE);
+        $kind = in_array($row['kind'] ?? null, self::kinds(), true) ? $row['kind'] : (str_contains($raw, '@') ? self::EMAIL : self::PHONE);
         $shown = mb_substr($raw, 0, 80);
 
         if ($kind === self::EMAIL) {
@@ -737,7 +958,7 @@ final class ContactPoints
      */
     private static function boxRow(array $row): array
     {
-        $kind = in_array($row['kind'] ?? null, self::KINDS, true) ? $row['kind'] : null;
+        $kind = in_array($row['kind'] ?? null, self::kinds(), true) ? $row['kind'] : null;
         $email = is_scalar($row['email'] ?? null) ? trim((string) $row['email']) : '';
         $phone = is_scalar($row['phone'] ?? null) ? trim((string) $row['phone']) : '';
         $value = is_scalar($row['value'] ?? null) ? trim((string) $row['value']) : '';
@@ -747,7 +968,7 @@ final class ContactPoints
         }
 
         if ($value === '') {
-            $value = $kind === self::EMAIL ? $email : ($kind === self::PHONE ? $phone : '');
+            $value = $kind === self::EMAIL ? $email : (self::isPhone($kind) ? $phone : '');
         }
 
         return ['kind' => $kind, 'value' => $value, 'phone_prefix' => $row['phone_prefix'] ?? '', 'label' => $row['label'] ?? ''];
@@ -778,7 +999,7 @@ final class ContactPoints
             [$prefix, $number] = self::storedPhone($card['phone_prefix'] ?? '', $raw);
             $valid = $prefix !== null && $number !== null && $number !== '';
             $out[] = [
-                'kind' => self::PHONE,
+                'kind' => self::primaryPhoneKind($card),
                 'value' => $valid ? $number : $raw,
                 'phone_prefix' => $valid ? $prefix : (is_scalar($card['phone_prefix'] ?? null) ? trim((string) $card['phone_prefix']) : ''),
                 'valid' => $valid,
@@ -786,6 +1007,12 @@ final class ContactPoints
         }
 
         return $out;
+    }
+
+    /** Il tipo del telefono principale di una scheda (`phone_kind`); senza la colonna è il fisso. */
+    private static function primaryPhoneKind(array $card): string
+    {
+        return self::isPhone($card['phone_kind'] ?? null) ? (string) $card['phone_kind'] : self::PHONE;
     }
 
     /**
@@ -842,7 +1069,7 @@ final class ContactPoints
     /** Lo stesso valore a meno di maiuscole (email) o di spazi e trattini (telefono). */
     private static function sameValue(string $kind, string $a, string $b): bool
     {
-        if ($kind === self::EMAIL) {
+        if (self::family($kind) === self::EMAIL) {
             return strtolower(trim($a)) === strtolower(trim($b));
         }
 
@@ -919,7 +1146,7 @@ final class ContactPoints
         $current = [];
         $known = ContactRelations::departments();
 
-        foreach (self::rows($store::find([$fk => $ownerId])) as $row) {
+        foreach (self::rows($store::find([$fk => $ownerId], null, 'id', 'ASC')) as $row) {
             $current[$row['kind'].'|'.$row['value']][(string) $row['department']] = (int) $row['id'];
         }
 
@@ -929,6 +1156,14 @@ final class ContactPoints
             unset($current[$key]);
             $existed = $before === null || isset($before[$key]);
             $wanted = $row['departments'] ?? null;
+
+            // Un ufficio solo (`department`): lo stesso di prima non tocca gli altri salvati, uno diverso li sostituisce.
+            if (!is_array($wanted) && array_key_exists('department', $row)) {
+                $wanted = ContactRelations::singleDepartment(
+                    $row['department'],
+                    $existed ? self::knownDepartments(array_map('strval', array_keys($stored))) : []
+                );
+            }
 
             if (!is_array($wanted)) {
                 if ($existed) {
