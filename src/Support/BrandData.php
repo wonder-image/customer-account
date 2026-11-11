@@ -30,6 +30,9 @@ final class BrandData
     /** I campi del brand kit; `email`, `phone_prefix`, `phone` sono il primo dei `contacts`. */
     public const KIT_FIELDS = ['contacts', 'email', 'phone_prefix', 'phone', 'socials', 'colors', 'tone', 'sector', 'language', 'assets_url'];
 
+    /** I campi del kit che il CRM mostra anche a kit spento: recapiti e social. */
+    public const CRM_FIELDS = ['contacts', 'socials'];
+
     /** Le sezioni ATECO 2025 / NACE Rev. 2.1: la stessa lettera in tutta l'UE. */
     public const SECTORS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U'];
 
@@ -488,15 +491,17 @@ final class BrandData
      * tocca e i recapiti salvati di `$stored` oltre la prima email e il primo
      * telefono restano in coda a quelli postati.
      *
+     * Con `$crm` e senza kit passano anche recapiti e social (`CRM_FIELDS`).
+     *
      * @param array<string, mixed> $values
      * @param array<string, mixed> $stored la riga salvata del brand (serve con `$primaryOnly`)
      * @return array{0: array<string, string>, 1: array<string, string>}
      */
-    public static function clean(array $values, bool $kit, array $stored = [], bool $primaryOnly = false): array
+    public static function clean(array $values, bool $kit, array $stored = [], bool $primaryOnly = false, bool $crm = false): array
     {
         $out = [];
         $errors = [];
-        $fields = $kit ? [...self::BASE_FIELDS, ...self::KIT_FIELDS] : self::BASE_FIELDS;
+        $fields = [...self::BASE_FIELDS, ...($kit ? self::KIT_FIELDS : ($crm ? self::CRM_FIELDS : []))];
 
         if ($primaryOnly) {
             $fields = array_values(array_diff($fields, ['socials']));

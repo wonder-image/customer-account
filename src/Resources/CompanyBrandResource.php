@@ -87,7 +87,9 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
             FormField::key('archived')->select($yesNo)->value('false')->label($labels['archived']),
         ];
 
-        if (!CompanyBrands::kitEnabled()) {
+        $kit = CompanyBrands::kitEnabled();
+
+        if (!$kit && !Crm::enabled()) {
             return $fields;
         }
 
@@ -129,6 +131,11 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
                     ->repeaterAddLabel((string) __t('contacts.brand_social_add'))
                     ->label($labels['socials']),
             ];
+        }
+
+        // Il CRM senza il kit: solo recapiti e social.
+        if (!$kit) {
+            return [...$fields, ...$primary];
         }
 
         return [
@@ -187,7 +194,9 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
 
         if ($groups[1] !== []) {
             $cards[] = (new Card)->columns(12)->columnSpan(12)->components([
-                SectionTitle::make((string) __t('contacts.brand_group_kit'))->tooltip((string) __t('contacts.brand_group_kit_tooltip'))->columnSpan(12),
+                CompanyBrands::kitEnabled()
+                    ? SectionTitle::make((string) __t('contacts.brand_group_kit'))->tooltip((string) __t('contacts.brand_group_kit_tooltip'))->columnSpan(12)
+                    : SectionTitle::make((string) __t('contacts.brand_group_crm'))->columnSpan(12),
                 ...$groups[1],
             ]);
         }
@@ -310,13 +319,14 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
         $upload = $values['logo'] ?? null;
         $manifest = $values['logo__wi_files'] ?? null;
         $kit = CompanyBrands::kitEnabled();
-        $primaryOnly = $kit && !Crm::enabled();
+        $crm = Crm::enabled();
+        $primaryOnly = $kit && !$crm;
 
         if ($primaryOnly) {
             $values = static::primaryContacts($values, $oldValues ?? []);
         }
 
-        [$data, $problems] = BrandData::clean($values, $kit, $oldValues ?? [], $primaryOnly);
+        [$data, $problems] = BrandData::clean($values, $kit, $oldValues ?? [], $primaryOnly, $crm);
 
         if ($problems !== []) {
             $labels = static::labelSchema();

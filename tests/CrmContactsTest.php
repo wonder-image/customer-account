@@ -362,6 +362,20 @@ check('CRM spento: il brand tiene domini, recapiti e social in più', function (
         && !array_key_exists('socials', $clean);
 });
 
+check('brand con il CRM e senza kit: passano recapiti e social, il resto del kit no', function () {
+    $posted = [
+        'contacts' => [['kind' => 'whatsapp', 'phone_prefix' => '+39', 'phone' => '3330001111'], ['kind' => 'email', 'email' => 'info@rossi.it']],
+        'socials' => [['network' => 'instagram', 'url' => 'https://instagram.com/rossi']],
+        'tone' => 'Diretto',
+    ];
+    [$crm, $errors] = BrandData::clean($posted, false, [], false, true);
+    [$off] = BrandData::clean($posted, false);
+
+    return $errors === [] && $crm['email'] === 'info@rossi.it' && $crm['phone'] === '3330001111'
+        && str_contains($crm['socials'], 'instagram') && !array_key_exists('tone', $crm)
+        && !array_key_exists('contacts', $off) && !array_key_exists('socials', $off);
+});
+
 check('social della persona: stesse reti e stessa pulizia dei brand, colonna in JSON, righe del ripetitore', function () {
     $column = Socials::column([
         ['network' => 'LinkedIn', 'url' => 'https://linkedin.com/in/anna'],
