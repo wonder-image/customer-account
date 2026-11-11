@@ -44,10 +44,17 @@ Le convenzioni del framework sono in `vendor/wonder-image/app/AGENTS.md`.
   `email` / `phone_prefix` / `phone` (tutto il sistema legge quelle), gli
   altri in `contact_points` / `company_points`, i tipi ufficio dei contatti in
   `company_point_departments` / `contact_point_departments` (per valore).
-  «Tipo ufficio» è un elenco solo (`ContactRelations::departments()`): di
+  «Ufficio» è un elenco solo (`ContactRelations::departments()`): di
   serie più quelli creati dal «+» (`OfficeTypes`, `OfficeTypeResource`,
-  l'id salvato come testo). Il form non chiede più «Principale» né
-  l'etichetta. Letture e scritture
+  l'id salvato come testo). Nei form è un select singolo (`department`),
+  con «Generale» (`ContactRelations::GENERAL`) come prima voce; le tabelle
+  restano a più valori. Il form non chiede più «Principale» né
+  l'etichetta. Con il CRM (`Support\Crm`, spento di base) i recapiti sono
+  più d'uno, con il tipo (`ContactPoints::kinds()`: `email`, `phone`,
+  `mobile`, `whatsapp`), e ci sono i social (`Support\Socials`,
+  `HasSocials`); senza, un'email e un telefono soli. Recapiti e social del
+  brand seguono il CRM anche senza kit (`BrandData::CRM_FIELDS`). Letture e
+  scritture
   solo da `ContactPoints` (`all()`, `split()`, `syncAll()`; `of()` / `sync()`
   per «Altri contatti»); la regola del principale sta in `split()`, mai nel
   JS. La Resource chiama `applyContactPoints()` in `mutateRequestValues()`.

@@ -4,6 +4,11 @@
 
 ### Added
 
+- CRM dei recapiti (`Support\Crm::enable()` / `enabled()`, spento di base): acceso, più recapiti per persone, aziende, brand e referenti con il tipo (`ContactPoints::kinds()`: `email`, `phone`, `mobile`, `whatsapp`; `kindOptions()`, `kindLabel()`, `isPhone()`, `family()`; tipo del telefono principale in `phone_kind`) e i recapiti del referente per azienda (`points`, tabella `contact_relation_points`). Spento, un'email e un telefono soli (`contactBoxSimple()`, `primary_only`): i recapiti e i social in più restano salvati. `Migrations\CrmContactPointsMigration` allinea le tabelle.
+- Social delle persone: `Support\Socials` (reti, pulizia, colonna `socials` di `contacts`) e trait `Resources\Concerns\HasSocials` (`socialFields()`, `withSocialValues()`, `applySocials()`, marker `socials_form`); i brand usano le stesse reti.
+- Brand: `BrandData::CRM_FIELDS` (`contacts`, `socials`) e quinto argomento `$crm` di `BrandData::clean()`: recapiti e social del brand seguono il CRM anche senza kit (gruppo «Recapiti e social»). `CompanyBrandResource` ha i ganci `officeTypeResource()`, `extraFormFields()` ed `extraFormCards()`.
+- Indirizzi dal lato del brand: `CompanyAddresses::forBrand()`, `brandProblems()` e `updateFromBrand()` leggono e correggono gli indirizzi che le aziende hanno applicato a un brand, solo nei campi di `BRAND_FIELDS`.
+- Email di accesso a parte: `HasContactPoints::separateAccessEmail()` e `accessEmailField()`; `ContactPoints::formRowsWithoutAccess()` e l'opzione `separate_email` di `split()` / `syncAll()`.
 - «Tipo ufficio» creabile: dal «+» accanto al campo, su recapiti e referenti, nasce un tipo nuovo (`Models\OfficeType`, tabella `contact_office_types`; `Support\OfficeTypes`; `Resources\OfficeTypeResource` con la creazione rapida del framework). Un nome già creato si riusa, uno di serie si rifiuta; i tipi si rinominano e non si eliminano. `ContactRelations::departments()` li dà insieme a quelli di serie.
 - «Tipo ufficio» anche sui recapiti delle persone (`Models\ContactPointDepartment`, tabella `contact_point_departments`).
 - Riquadro «Contatti» diviso per tipo: `HasContactPoints::contactBoxByKindFields()` dà un elenco per le email e uno per i telefoni (`pointKindInputs()`: `contact_points_email`, `contact_points_phone`), ognuno con il suo «Aggiungi» e senza la tendina del tipo. `foldContactPointKinds()` li ricompone in `contact_points` prima di `applyContactPoints()` e `syncContactPoints()`, quindi regole e salvataggio non cambiano. `contactBoxFields()` resta com'è.
@@ -15,6 +20,11 @@
 
 ### Changed
 
+- «Tipo ufficio» si chiama «Ufficio» ed è un select singolo ovunque (recapiti, referenti, brand), con il «+» e «Generale» (`ContactRelations::GENERAL`) come prima voce, che vale per tutte le aree. I form postano `department`; le tabelle restano a più valori e `departments` vale ancora da codice (`singleDepartment()`, `firstDepartment()`).
+- Referenti: la riga ha controparte, «Ruolo» e «Ufficio» su una riga e sotto i «Contatti aziendali» (`workContactColumns()`: con il CRM il repeater `points`, senza «Email aziendale», «Prefisso», «Telefono aziendale»). Via dal form «Principale», «Riceve i documenti», «Accesso» e la creazione della persona da «Nome» e «Cognome»: `new_name`, `new_surname`, `new_email` postati si scartano e una riga compilata senza controparte ferma il salvataggio (`relation_person_required`, `relation_company_required`). Una riga senza quei flag tiene i salvati; un legame nuovo nasce principale, in copia e con accesso `buyer` (se la guardia lo permette).
+- Referenti: «Brand seguiti» si vede e conta solo se l'azienda ha più di un brand (`RELATION_BRANDS_MANY`); nella tendina delle aziende di una persona c'è solo la ragione sociale (`relationLabel()`).
+- Brand delle aziende: via «Predefinito» dal repeater di `HasCompanyBrands`. Resta il predefinito di prima se c'è ancora, altrimenti vale il primo (`CompanyBrands::defaultOf()`); da codice una riga può ancora portare `is_default`.
+- Riquadro «Contatti»: di nuovo un riquadro solo. Con il CRM una riga per recapito con il tipo (`ContactPoints::kindOptions()`), senza un'email e un telefono. `contactBoxByKindFields()` resta per chi lo usa.
 - Recapiti: via «Principale» e «Etichetta» dal form, «Si occupa di» diventa «Tipo ufficio» e sta in riga, uguale su recapiti, referenti e brand. Il principale resta quello di prima, poi la prima riga; l'etichetta salvata si conserva. `Migrations\PointOfficeTypesMigration` porta l'etichetta «Fatturazione» nel tipo «Amministrazione», una volta sola.
 - «Mansione» si chiama «Ruolo» (la chiave `job_title` non cambia).
 - Brand: i colori hanno un nome. `colors` si salva come lista di `{color, name}`; `BrandData::palette()` li rilegge e accetta anche la lista di soli esadecimali di prima (nome vuoto).
@@ -27,6 +37,7 @@
 
 ### Breaking
 
+- `HasContactRelations`: via `departmentsColumn()`, `relationFlagColumns()` e `relationPersonExistsMessage()`. Chi li ridefiniva o li chiamava va adeguato: l'ufficio è `officeColumn()` (colonna `department`), i flag non sono più colonne del form.
 - `HasContactPoints::contactFormScript()` restituisce un `RichText` invece di una stringa: tra i componenti di una card la stringa veniva scartata senza dire niente e lo script non arrivava nella pagina. Chi lo concatena a un HTML usa `ContactFormScript::html()`.
 - Riquadro «Contatti»: richiede `wonder-image/app` `2.4.0-beta.7` (`repeaterMinRows()`) e la lib `2.1.2-alpha.41`. Le colonne per tipo le nasconde il framework (`visibleWhen('kind', …)`), non più lo script del modulo; etichetta e «Si occupa di» passano nelle informazioni avanzate della riga.
 - Le aziende non sono più schede di `contacts`: stanno in `companies` / `company_addresses` (`Company`, `CompanyAddress`, `CompanyResource` su `/backend/companies/`, `CompanyAddressResource`). `contacts` perde `type`, `business_name`, `pi`, `sdi`, `pec` e `is_supplier`; i fornitori sono sempre aziende.
