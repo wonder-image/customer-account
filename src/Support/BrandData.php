@@ -404,8 +404,25 @@ final class BrandData
     }
 
     /**
+     * Il tipo ufficio di un recapito del brand: una chiave di
+     * `ContactRelations::departments()`. Le etichette di prima restano come
+     * sono («Fatturazione» diventa Amministrazione); una scritta a mano
+     * diventa vuota.
+     */
+    public static function officeType(mixed $value): string
+    {
+        $key = is_scalar($value) ? trim((string) $value) : '';
+
+        if ($key === 'billing') {
+            $key = 'administration';
+        }
+
+        return $key !== '' && array_key_exists($key, ContactRelations::departments()) ? $key : ContactPoints::label($key);
+    }
+
+    /**
      * I recapiti del brand: righe `kind` (`email` / `phone`), `email` oppure
-     * `phone_prefix` + `phone`, `label` facoltativa (una di `ContactPoints::labels()`). Le righe vuote si
+     * `phone_prefix` + `phone`, `label` facoltativa (un tipo ufficio di `ContactRelations::departments()`). Le righe vuote si
      * saltano, i doppioni pure. Null se una riga non va o sono troppe.
      *
      * @return list<array{kind: string, email?: string, phone_prefix?: string, phone?: string, label: string}>|null
@@ -421,8 +438,7 @@ final class BrandData
             }
 
             $kind = is_scalar($row['kind'] ?? null) ? (string) $row['kind'] : '';
-            // Solo le etichette preimpostate: una scritta a mano di prima diventa vuota.
-            $label = ContactPoints::label($row['label'] ?? '');
+            $label = self::officeType($row['label'] ?? '');
 
             if ($kind === ContactPoints::PHONE) {
                 $phone = ContactPoints::phoneNumber($row['phone'] ?? '');

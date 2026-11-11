@@ -84,6 +84,19 @@ check('createPerson: con una persona scelta o senza nome non crea nulla', functi
     return Query::$writes === [];
 });
 
+check('createPerson: un\'email già di una persona lega quella, senza creare un doppione', function () use ($tables) {
+    Query::reset($tables());
+    $first = ContactRelations::createPerson(['person_id' => '', 'new_name' => 'Marta', 'email' => 'marta@rossi.test']);
+    $writes = count(Query::$writes);
+    $again = ContactRelations::createPerson(['person_id' => '', 'new_name' => 'Marta bis', 'new_email' => ' MARTA@rossi.test ']);
+    $work = ContactRelations::createPerson(['person_id' => '', 'new_name' => 'Marta ter', 'email' => 'marta@rossi.test']);
+    $noEmail = ContactRelations::createPerson(['person_id' => '', 'new_name' => 'Senza']);
+
+    return $again['person_id'] === $first['person_id'] && $work['person_id'] === $first['person_id']
+        && $noEmail['person_id'] !== $first['person_id'] && count(Query::$writes) === $writes + 1
+        && ContactRelations::personByEmail('') === [];
+});
+
 check('accessOf e companiesOf filtrano per accesso', function () use ($tables) {
     Query::reset($tables() + ['contact_relations' => [
         1 => ['id' => 1, 'company_id' => 1, 'person_id' => 2, 'access' => 'admin', 'position' => 1, 'deleted' => 'false'],
@@ -586,7 +599,7 @@ check('niente più `department` nello schema del legame: lo toglie runTables() d
     $migrations = $manifest['database']['migrations'];
 
     return !array_key_exists('department', $schema) && !array_key_exists('ind_department', $schema)
-        && end($migrations) === RelationDepartmentsMigration::class;
+        && in_array(RelationDepartmentsMigration::class, $migrations, true);
 });
 
 check('principale dal lato persona: ogni azienda tiene il suo, gli altri referenti di quell\'azienda lo perdono', function () use ($tables) {

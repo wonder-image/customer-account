@@ -3,8 +3,8 @@
  * dei form del backend. Lo stampa una volta `Support\ContactFormScript`.
  *
  * Le colonne per tipo (email o prefisso e numero) le mostra e nasconde il
- * framework (`visibleWhen('kind', …)`); il minimo di una riga lo tiene
- * `repeaterMinRows(1)`. Qui restano un principale per tipo, la riga
+ * framework (`visibleWhen('kind', …)`), oppure il riquadro è diviso in un
+ * elenco per tipo e il tipo è un campo nascosto. Qui restano un principale per tipo, la riga
  * dell'email di accesso bloccata e il nome dell'attività scelta da Google.
  * Le regole vere stanno sul server (`ContactPoints::split()`): qui c'è solo
  * quello che serve a vederle subito.
@@ -17,8 +17,10 @@
     function rowOf(input) { return input.closest('.wi-repeater-row'); }
 
     function kindOf(row) {
-        var kind = row && row.querySelector('select[data-ca-point-kind]');
-        return kind ? (kind.value === 'phone' ? 'phone' : 'email') : '';
+        // Una tendina (riquadro unico) o un campo nascosto con il tipo fisso (elenchi per tipo).
+        var kind = row && row.querySelector('[data-ca-point-kind]');
+        if (!kind) { return ''; }
+        return (kind.getAttribute('data-ca-point-kind') || kind.value) === 'phone' ? 'phone' : 'email';
     }
 
     function emit(el) {
@@ -46,33 +48,10 @@
             row.setAttribute('data-ca-point-locked-row', 'true');
             return;
         }
-
-        // «Email di accesso» non si sceglie: è solo della riga bloccata.
-        var label = row.querySelector('select[data-ca-point-label]');
-        var access = label && label.querySelector('option[value="access"]');
-        if (access) { access.remove(); }
-    }
-
-    // Un solo principale per tipo: accenderne uno spegne gli altri dello stesso tipo.
-    function demoteOthers(row) {
-        var primary = row.querySelector('select[data-ca-point-primary]');
-        var list = row.parentElement;
-        if (!primary || primary.value !== 'true' || !list) { return; }
-
-        var kind = kindOf(row);
-
-        list.querySelectorAll('.wi-repeater-row').forEach(function (other) {
-            if (other === row || kindOf(other) !== kind || other.getAttribute('data-ca-point-locked-row') === 'true') { return; }
-            var select = other.querySelector('select[data-ca-point-primary]');
-            if (select && select.value === 'true') {
-                select.value = 'false';
-                emit(select);
-            }
-        });
     }
 
     function refreshAll(root) {
-        (root || document).querySelectorAll('select[data-ca-point-kind]').forEach(function (kind) {
+        (root || document).querySelectorAll('[data-ca-point-kind]').forEach(function (kind) {
             var row = rowOf(kind);
             if (row) { refreshRow(row); }
         });
@@ -84,10 +63,7 @@
 
         if (target.matches('select[data-ca-point-kind]')) {
             var row = rowOf(target);
-            if (row) { refreshRow(row); demoteOthers(row); }
-        } else if (target.matches('select[data-ca-point-primary]')) {
-            var primaryRow = rowOf(target);
-            if (primaryRow) { demoteOthers(primaryRow); }
+            if (row) { refreshRow(row); }
         }
     });
 

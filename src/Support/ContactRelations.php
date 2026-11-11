@@ -258,7 +258,8 @@ final class ContactRelations
             $out[$key] = (string) __t('contacts.department_'.$key);
         }
 
-        return $out + self::$extraDepartments;
+        // I tipi creati a mano hanno per chiave il loro id: `+` e non `array_merge`, che li rinumera.
+        return $out + self::$extraDepartments + OfficeTypes::options();
     }
 
     /**
@@ -730,12 +731,41 @@ final class ContactRelations
     }
 
     /**
+     * La persona (non eliminata) che ha già questa email, o `[]`.
+     *
+     * @return array<string, mixed>
+     */
+    public static function personByEmail(string $email): array
+    {
+        $email = strtolower(trim($email));
+
+        if ($email === '') {
+            return [];
+        }
+
+        try {
+            $rows = Contact::find(['email' => $email, 'deleted' => 'false']);
+        } catch (\Throwable) {
+            return [];
+        }
+
+        if (!is_array($rows) || $rows === []) {
+            return [];
+        }
+
+        $rows = isset($rows['id']) ? [$rows] : array_values(array_filter($rows, 'is_array'));
+
+        return (int) ($rows[0]['id'] ?? 0) > 0 ? $rows[0] : [];
+    }
+
+    /**
      * Crea al volo la persona di una riga dei referenti, se la riga non ne
      * sceglie una ma ne scrive nome o cognome. Torna la riga con `person_id`.
      *
      * Una persona creata così non ha un accesso ed è solo un referente
      * (`is_customer` falso), salvo che `$payload` dica altro. Senza
-     * `new_email` prende l'email di lavoro della riga (`email`).
+     * `new_email` prende l'email di lavoro della riga (`email`). Se una persona
+     * con quell'email c'è già, la riga si lega a lei e non nasce un doppione.
      *
      * @param array<string, mixed> $row
      * @param callable(array<string, mixed>): array<string, mixed>|null $payload ritocca i valori della scheda
@@ -766,6 +796,15 @@ final class ContactRelations
         // L'email è facoltativa: vuota non si manda, altrimenti la validazione la scarta.
         if ($email !== '') {
             $values['email'] = $email;
+        }
+
+        // Una persona con quell'email c'è già: si lega quella, non se ne crea un doppione.
+        $existing = self::personByEmail($email);
+
+        if ($existing !== []) {
+            $row[self::PERSON] = (int) $existing['id'];
+
+            return $row;
         }
 
         $result = Contact::create($payload !== null ? $payload($values) : $values);
@@ -985,6 +1024,9 @@ final class ContactRelations
             $current[(string) $row['department']] = (int) $row['id'];
         }
 
+        // Un tipo creato a mano ha per chiave il suo id: negli array torna intero, qui sempre testo.
+        $departments = array_map('strval', $departments);
+
         foreach ($departments as $department) {
             if (!isset($current[$department])) {
                 $result = ContactRelationDepartment::create(['relation_id' => $relationId, 'department' => $department]);
@@ -996,7 +1038,7 @@ final class ContactRelations
         }
 
         foreach ($current as $department => $rowId) {
-            if (!in_array($department, $departments, true)) {
+            if (!in_array((string) $department, $departments, true)) {
                 ContactRelationDepartment::delete($rowId);
             }
         }
