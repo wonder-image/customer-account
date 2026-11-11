@@ -153,6 +153,17 @@ trait HasContactRelations
                 $problems[] = (string) __t('contacts.work_email_invalid', ['value' => mb_substr($email, 0, 80)]);
             }
 
+            // Una riga «nuova persona» con l'email di una persona che c'è già: si sceglie quella.
+            $newPerson = static::relationSide() === ContactRelations::COMPANY
+                && (int) ($row[ContactRelations::PERSON] ?? 0) <= 0
+                && trim((is_scalar($row['new_name'] ?? null) ? (string) $row['new_name'] : '').(is_scalar($row['new_surname'] ?? null) ? (string) $row['new_surname'] : '')) !== '';
+            $newEmail = is_scalar($row['new_email'] ?? null) && trim((string) $row['new_email']) !== '' ? strtolower(trim((string) $row['new_email'])) : $email;
+            $existing = $newPerson ? ContactRelations::personByEmail($newEmail) : [];
+
+            if ($existing !== []) {
+                $problems[] = static::relationPersonExistsMessage($existing, $newEmail);
+            }
+
             if (ContactPoints::phoneNumber($phone) === null || (ContactPoints::phoneNumber($phone) !== '' && ContactPoints::phonePrefix($row['phone_prefix'] ?? '') === null)) {
                 $problems[] = (string) __t('contacts.work_phone_invalid', ['value' => is_scalar($phone) ? mb_substr((string) $phone, 0, 40) : '']);
             }
@@ -161,6 +172,19 @@ trait HasContactRelations
         if ($problems !== []) {
             throw new InvalidArgumentException(implode("\n", array_values(array_unique($problems))));
         }
+    }
+
+    /**
+     * Cosa dire quando la riga «nuova persona» porta l'email di una persona
+     * che c'è già. Chi ha schede che non tutti vedono lo riscrive.
+     *
+     * @param array<string, mixed> $person
+     */
+    protected static function relationPersonExistsMessage(array $person, string $email): string
+    {
+        $name = trim((string) ($person['name'] ?? '').' '.(string) ($person['surname'] ?? ''));
+
+        return (string) __t('contacts.relation_person_exists', ['email' => mb_substr($email, 0, 80), 'contact' => $name !== '' ? $name : $email]);
     }
 
     /**
