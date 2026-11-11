@@ -62,6 +62,7 @@ trait HasContactPoints
         return RepeaterColumn::key('departments')
             ->selectSearch(ContactRelations::departments(), true)
             ->quickCreate(static::officeTypeResource(), ['name'], null, 'name', (string) __t('contacts.office_type_add'))
+            ->quickCreateCompact()
             ->label((string) __t('contacts.office_type'))
             ->columnSpan($span);
     }
