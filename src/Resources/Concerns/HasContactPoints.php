@@ -226,8 +226,7 @@ trait HasContactPoints
                 ->repeater([
                     RepeaterColumn::key('kind')->select($kinds)->value(ContactPoints::EMAIL)
                         ->label((string) __t('contacts.point_kind'))->columnSpan(2),
-                    RepeaterColumn::key('label')->select(['' => (string) __t('contacts.option_none_f')] + ContactPoints::labels())->value('')
-                        ->label((string) __t('contacts.point_label'))->columnSpan(3),
+                    static::pointOfficeTypeColumn(3),
                     RepeaterColumn::key('phone_prefix')->text()
                         ->label((string) __t('contacts.point_prefix'))->columnSpan(2),
                     RepeaterColumn::key('value')->text()
