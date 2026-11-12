@@ -202,6 +202,7 @@ abstract class PartyRecord
                 'work_email' => (string) ($row['work_email'] ?? ''),
                 'work_phone_prefix' => (string) ($row['work_phone_prefix'] ?? ''),
                 'work_phone' => (string) ($row['work_phone'] ?? ''),
+                'points' => $row['points'] ?? [],
             ];
         }
 
@@ -210,7 +211,8 @@ abstract class PartyRecord
 
     /**
      * Le email o i telefoni (`ContactPoints::all()`): valore, etichetta,
-     * principale e, per i telefoni, prefisso; per le aziende le aree
+     * principale e, per i telefoni, prefisso e tipo (`kind`: fisso,
+     * cellulare, WhatsApp); per le aziende le aree
      * (`departments`, vuota = tutto).
      *
      * @param list<array<string, mixed>> $points
@@ -221,12 +223,12 @@ abstract class PartyRecord
         $out = [];
 
         foreach ($points as $point) {
-            if ($point['kind'] !== $kind) {
+            if (ContactPoints::family($point['kind']) !== $kind) {
                 continue;
             }
 
             $item = $kind === ContactPoints::PHONE
-                ? ['phone_prefix' => $point['phone_prefix'], 'value' => $point['value'], 'label' => $point['label']]
+                ? ['kind' => $point['kind'], 'phone_prefix' => $point['phone_prefix'], 'value' => $point['value'], 'label' => $point['label']]
                 : ['value' => $point['value'], 'label' => $point['label']];
             $item['is_primary'] = (bool) $point['is_primary'];
 

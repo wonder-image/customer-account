@@ -5,6 +5,9 @@ declare(strict_types=1);
 require __DIR__.'/support/FakeDb.php';
 require __DIR__.'/bootstrap.php';
 
+// Il riquadro a righe è quello con il CRM acceso (spento: un'email e un telefono soli, vedi CrmContactsTest).
+\Wonder\Plugin\CustomerAccount\Support\Crm::enable();
+
 // Gli helper globali che Repeater::syncRelatedRows() usa, sopra il FakeDb.
 if (!function_exists('sqlSelect')) {
     function sqlSelect($table, $condition = null, $limit = null, $order = null, $orderDirection = null, $attributes = '*') { return (new \Wonder\Sql\Query)->Select($table, $condition, $limit, $order, $orderDirection, $attributes); }
@@ -143,8 +146,8 @@ check('form: riquadro «Contatti» su persone e aziende; «Altri contatti» (mar
         && $untouched === []
         && Query::$tables['company_points'] !== [] && (int) array_values(Query::$tables['company_points'])[0]['company_id'] === 2
         && $form['contact_points'] === [
-            ['kind' => 'email', 'email' => 'info@rossi.test', 'phone_prefix' => '', 'phone' => '', 'label' => '', 'is_primary' => 'true', 'locked' => '', 'departments' => []],
-            ['kind' => 'email', 'email' => 'ordini@rossi.test', 'phone_prefix' => '', 'phone' => '', 'label' => 'work', 'is_primary' => 'false', 'locked' => '', 'departments' => []],
+            ['kind' => 'email', 'email' => 'info@rossi.test', 'phone_prefix' => '', 'phone' => '', 'label' => '', 'is_primary' => 'true', 'locked' => '', 'access' => '', 'departments' => [], 'department' => ''],
+            ['kind' => 'email', 'email' => 'ordini@rossi.test', 'phone_prefix' => '', 'phone' => '', 'label' => 'work', 'is_primary' => 'false', 'locked' => '', 'access' => '', 'departments' => [], 'department' => ''],
         ]
         && !array_key_exists('contact_points', $address);
 });
@@ -162,8 +165,8 @@ check('record: email principale invariata, tutti i contatti in emails e phones (
     return $person['schema'] === 4 && $person['email'] === 'anna@rossi.test'
         && $person['emails'] === [['value' => 'anna@rossi.test', 'label' => '', 'is_primary' => true], ['value' => 'b@rossi.test', 'label' => 'billing', 'is_primary' => false]]
         && $person['phones'] === [
-            ['phone_prefix' => '+39', 'value' => '3331112222', 'label' => '', 'is_primary' => true],
-            ['phone_prefix' => '+39', 'value' => '021234567', 'label' => 'work', 'is_primary' => false],
+            ['kind' => 'phone', 'phone_prefix' => '+39', 'value' => '3331112222', 'label' => '', 'is_primary' => true],
+            ['kind' => 'phone', 'phone_prefix' => '+39', 'value' => '021234567', 'label' => 'work', 'is_primary' => false],
         ]
         && $company['emails'] === [['value' => 'info@rossi.test', 'label' => '', 'is_primary' => true, 'departments' => []]] && $company['phones'] === []
         && $in['emails'] === [['value' => 'no']]

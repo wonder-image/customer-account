@@ -51,6 +51,15 @@ check('modifica: il predefinito non cambia', function () use ($address, $seed, $
     return $saved->success && $row(2)['is_default'] === 'false' && $row(1)['is_default'] === 'true' && $row(2)['street'] === 'Via Roma';
 });
 
+check('«Presso» non è nel form del pannello: una modifica non lo perde e un valore postato non lo scrive', function () use ($address, $seed, $row) {
+    Query::reset(['contact_addresses' => [1 => $seed(1, 5, 1, 'true') + ['business_name' => 'Studio Rossi']]]);
+    $saved = AccountAddresses::save(5, ['street' => 'Via Po', 'business_name' => 'Altro'] + $address, 1);
+    $created = AccountAddresses::save(5, ['business_name' => 'Altro'] + $address);
+    return $saved->success && $row(1)['street'] === 'Via Po' && $row(1)['business_name'] === 'Studio Rossi'
+        && $created->success && !array_key_exists('business_name', $row($created->id))
+        && !isset(\Wonder\Plugin\CustomerAccount\Models\ContactAddress::address()->labels()['business_name']);
+});
+
 check('indirizzo di un\'altra scheda: save e delete falliscono senza scrivere', function () use ($address, $seed, $row) {
     Query::reset(['contact_addresses' => [1 => $seed(1, 5, 1, 'true')]]);
     $saved = AccountAddresses::save(6, $address, 1);

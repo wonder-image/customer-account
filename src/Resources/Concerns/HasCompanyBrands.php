@@ -11,8 +11,11 @@ use Wonder\Plugin\CustomerAccount\Support\CompanyBrands;
 
 /**
  * Il campo «Brand» di una Resource delle aziende: un repeater con il brand
- * (select cercabile con il «+» per crearne uno al volo), il ruolo
- * dell'azienda verso il brand e il predefinito.
+ * (select cercabile con il «+» per crearne uno al volo) e il ruolo
+ * dell'azienda verso il brand. Il predefinito non si sceglie nel form: resta
+ * quello di prima se c'è ancora, altrimenti vale il primo
+ * (`CompanyBrands::defaultOf()`); da codice una riga può ancora portare
+ * `is_default`.
  *
  * Il valore non è una colonna e il repeater non ha una `RepeaterRelation`:
  * il sync del core non lo tocca. Si legge da `CompanyBrands::linksOf()` in
@@ -39,25 +42,19 @@ trait HasCompanyBrands
     /** @return list<Input> */
     public static function brandFields(): array
     {
-        $yesNo = ['false' => (string) __t('contacts.no'), 'true' => (string) __t('contacts.yes')];
-
         return [
             FormField::key(static::$brandsInput)
                 ->repeater([
                     RepeaterColumn::key('brand_id')
                         ->selectSearch(['' => (string) __t('contacts.option_none')] + CompanyBrands::options())
                         ->quickCreate(static::brandResource(), ['name'], null, 'name', (string) __t('contacts.brand_add'))
+                        ->attribute('data-ca-company-brand')
                         ->label((string) __t('contacts.brand'))
                         ->columnSpan(6),
                     RepeaterColumn::key('role')
                         ->select(CompanyBrands::roles())
                         ->value(CompanyBrandLink::ROLE_OWNER)
                         ->label((string) __t('contacts.brand_role'))
-                        ->columnSpan(3),
-                    RepeaterColumn::key('is_default')
-                        ->select($yesNo)
-                        ->value('false')
-                        ->label((string) __t('contacts.brand_is_default'))
                         ->columnSpan(3),
                 ])
                 ->nested()
@@ -68,7 +65,7 @@ trait HasCompanyBrands
         ];
     }
 
-    /** Aggiunge al form i brand legati, con ruolo e predefinito. */
+    /** Aggiunge al form i brand legati, con il ruolo. */
     public static function withBrandValues(array $values): array
     {
         $id = (int) ($values['id'] ?? 0);
@@ -77,7 +74,6 @@ trait HasCompanyBrands
             $values[static::$brandsInput] = array_map(static fn (array $link): array => [
                 'brand_id' => $link['brand_id'],
                 'role' => $link['role'],
-                'is_default' => $link['is_default'] ? 'true' : 'false',
             ], CompanyBrands::linksOf($id));
         }
 
@@ -98,8 +94,9 @@ trait HasCompanyBrands
         string $action = 'store',
         string $context = 'backend'
     ): array {
-        $summary = parent::syncRepeaterRelations($parentId, $post, $files, $action, $context);
+        $brands = null;
 
+        // Prima dei referenti: i loro «brand seguiti» valgono solo per i brand già legati all'azienda.
         if (isset($post[static::$brandsMarker])) {
             $posted = $post[static::$brandsInput] ?? [];
             $items = [];
@@ -109,7 +106,13 @@ trait HasCompanyBrands
                 $items[] = is_array($item) ? array_intersect_key($item, array_flip(['brand_id', 'role', 'is_default'])) : $item;
             }
 
-            $summary[static::$brandsInput] = CompanyBrands::sync((int) $parentId, $items);
+            $brands = CompanyBrands::sync((int) $parentId, $items);
+        }
+
+        $summary = parent::syncRepeaterRelations($parentId, $post, $files, $action, $context);
+
+        if ($brands !== null) {
+            $summary[static::$brandsInput] = $brands;
         }
 
         return $summary;

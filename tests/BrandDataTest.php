@@ -9,6 +9,7 @@ use Wonder\Plugin\CustomerAccount\Models\CompanyBrand;
 use Wonder\Plugin\CustomerAccount\Resources\CompanyBrandResource;
 use Wonder\Plugin\CustomerAccount\Support\BrandData;
 use Wonder\Plugin\CustomerAccount\Support\CompanyBrands;
+use Wonder\Plugin\CustomerAccount\Support\Crm;
 use Wonder\Plugin\CustomerAccount\Support\CompanyRecord;
 use Wonder\Sql\Query;
 
@@ -118,12 +119,14 @@ check('form del brand: due gruppi, il kit solo se acceso; URL non validi rifiuta
     $values = CompanyBrandResource::mutateRequestValues(['name' => 'La Piana', 'website' => 'lapiana.it', 'email' => 'x@lapiana.it', 'colors' => '#fff'], 'store');
     $bad = $reject(static fn () => CompanyBrandResource::mutateRequestValues(['name' => 'La Piana', 'website' => 'javascript:alert(1)'], 'store'));
     CompanyBrands::useKit();
+    Crm::enable();
     $on = $names();
     $onCards = count(CompanyBrandResource::formLayoutSchema()->components);
     $kit = CompanyBrandResource::mutateRequestValues(['name' => 'La Piana', 'email' => 'X@LaPiana.it', 'colors' => '#fff, #000', 'socials' => ['row_1' => ['network' => 'instagram', 'url' => 'https://instagram.com/lapiana']]], 'store');
     $badColor = $reject(static fn () => CompanyBrandResource::mutateRequestValues(['name' => 'La Piana', 'colors' => 'expression(alert(1))'], 'store'));
     $form = CompanyBrandResource::mutateFormValues(['id' => 1, 'colors' => '["#ffffff","#000000"]', 'socials' => '{"instagram":"https://instagram.com/lapiana"}'], 'edit');
     CompanyBrands::useKit(false);
+    Crm::enable(false);
 
     return !in_array('email', $off, true) && in_array('logo', $off, true) && in_array('website', $off, true)
         && in_array('socials', $on, true) && in_array('colors', $on, true) && CompanyBrands::kitEnabled() === false
@@ -132,6 +135,84 @@ check('form del brand: due gruppi, il kit solo se acceso; URL non validi rifiuta
         && $bad === 'contacts.brand_invalid' && $badColor === 'contacts.brand_invalid'
         && $kit['email'] === 'x@lapiana.it' && $kit['colors'] === '[{"color":"#ffffff","name":""},{"color":"#000000","name":""}]' && $kit['socials'] === '{"instagram":"https://instagram.com/lapiana"}'
         && $form['colors'] === [['color' => '#ffffff', 'name' => ''], ['color' => '#000000', 'name' => '']] && $form['socials'] === [['network' => 'instagram', 'url' => 'https://instagram.com/lapiana']];
+});
+
+check('recapiti del brand con il CRM: tipo fra email, fisso, cellulare e WhatsApp; ufficio singolo con «Generale» e il «+»', function () use ($reject) {
+    Query::reset(['company_brands' => []]);
+    CompanyBrands::useKit();
+    Crm::enable();
+    $columns = [];
+
+    foreach (CompanyBrandResource::formSchema() as $field) {
+        if ($field->name === 'contacts') {
+            foreach ($field->get('context')['columns'] ?? [] as $column) {
+                $columns[$column->name] = $column;
+            }
+        }
+    }
+
+    $saved = CompanyBrandResource::mutateRequestValues(['name' => 'La Piana', 'contacts' => [
+        ['kind' => 'whatsapp', 'phone_prefix' => '39', 'phone' => '333 1234567', 'label' => 'sales'],
+        ['kind' => 'mobile', 'phone_prefix' => '39', 'phone' => '3339999999', 'label' => ''],
+        ['kind' => 'email', 'email' => 'Info@LaPiana.it', 'label' => 'general'],
+    ]], 'store');
+    $rows = json_decode($saved['contacts'], true);
+    $form = CompanyBrandResource::mutateFormValues(['id' => 1, 'contacts' => $saved['contacts']], 'edit')['contacts'];
+    $badKind = $reject(static fn () => CompanyBrandResource::mutateRequestValues(['name' => 'La Piana', 'contacts' => [['kind' => 'fax', 'phone' => '1']]], 'store'));
+    CompanyBrands::useKit(false);
+    Crm::enable(false);
+
+    return array_keys($columns) === ['kind', 'email', 'phone_prefix', 'phone', 'label']
+        && array_keys($columns['kind']->get('options')) === ['email', 'phone', 'mobile', 'whatsapp']
+        && array_key_first($columns['label']->get('options')) === 'general' && !array_key_exists('', $columns['label']->get('options')) && $columns['label']->get('multiple') === false
+        && array_column($rows, 'kind') === ['whatsapp', 'mobile', 'email'] && $rows[0]['label'] === 'sales' && $rows[1]['label'] === ''
+        && $saved['email'] === 'info@lapiana.it' && $saved['phone'] === $rows[0]['phone']
+        && array_column($form, 'label') === ['sales', 'general', 'general']
+        && $badKind === 'contacts.brand_invalid';
+});
+
+check('brand con il CRM spento: un\'email e un telefono soli, niente social; salvare non cancella i recapiti in più né i social', function () {
+    Query::reset(['company_brands' => []]);
+    CompanyBrands::useKit();
+    $names = array_map(static fn ($field) => $field->name, CompanyBrandResource::formSchema());
+    $cards = count(CompanyBrandResource::formLayoutSchema()->components);
+    $stored = [
+        'id' => 1, 'name' => 'La Piana', 'archived' => 'false',
+        'socials' => '{"instagram":"https://instagram.com/lapiana"}',
+        'contacts' => json_encode([
+            ['kind' => 'email', 'email' => 'info@lapiana.it', 'label' => 'sales'],
+            ['kind' => 'mobile', 'phone_prefix' => '39', 'phone' => '3331111111', 'label' => 'administration'],
+            ['kind' => 'email', 'email' => 'ordini@lapiana.it', 'label' => ''],
+            ['kind' => 'whatsapp', 'phone_prefix' => '39', 'phone' => '3332222222', 'label' => ''],
+        ]),
+        'email' => 'info@lapiana.it', 'phone_prefix' => '39', 'phone' => '3331111111',
+    ];
+    $saved = CompanyBrandResource::mutateRequestValues(
+        ['name' => 'La Piana', 'email' => 'Nuova@LaPiana.it', 'phone_prefix' => '39', 'phone' => '3330000000', 'socials' => [['network' => 'facebook', 'url' => 'https://facebook.com/pirata']]],
+        'update', 'backend', $stored
+    );
+    $rows = json_decode($saved['contacts'], true);
+    // Senza i tre campi (un altro scrittore) i recapiti non si toccano.
+    $untouched = CompanyBrandResource::mutateRequestValues(['name' => 'La Piana', 'website' => 'lapiana.it'], 'update', 'backend', $stored);
+    // Il telefono svuotato toglie solo il primo telefono.
+    $emptied = json_decode(CompanyBrandResource::mutateRequestValues(['name' => 'La Piana', 'email' => 'info@lapiana.it', 'phone_prefix' => '39', 'phone' => ''], 'update', 'backend', $stored)['contacts'], true);
+    $form = CompanyBrandResource::mutateFormValues($stored, 'edit');
+    CompanyBrands::useKit(false);
+
+    return !in_array('contacts', $names, true) && !in_array('socials', $names, true)
+        && in_array('email', $names, true) && in_array('phone_prefix', $names, true) && in_array('phone', $names, true) && in_array('colors', $names, true)
+        && $cards === 2
+        && !array_key_exists('socials', $saved)
+        && $rows === [
+            ['kind' => 'email', 'email' => 'nuova@lapiana.it', 'label' => 'sales'],
+            ['kind' => 'mobile', 'phone_prefix' => '+39', 'phone' => '3330000000', 'label' => 'administration'],
+            ['kind' => 'email', 'email' => 'ordini@lapiana.it', 'label' => ''],
+            ['kind' => 'whatsapp', 'phone_prefix' => '+39', 'phone' => '3332222222', 'label' => ''],
+        ]
+        && $saved['email'] === 'nuova@lapiana.it' && $saved['phone'] === '3330000000'
+        && !array_key_exists('contacts', $untouched) && !array_key_exists('email', $untouched)
+        && array_column($emptied, 'kind') === ['email', 'email', 'whatsapp']
+        && $form['email'] === 'info@lapiana.it' && $form['phone'] === '3331111111';
 });
 
 check('palette: nomi dei colori puliti e tenuti, doppioni col primo nome, vecchie liste di stringhe rilette', function () {

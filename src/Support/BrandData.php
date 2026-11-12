@@ -30,6 +30,9 @@ final class BrandData
     /** I campi del brand kit; `email`, `phone_prefix`, `phone` sono il primo dei `contacts`. */
     public const KIT_FIELDS = ['contacts', 'email', 'phone_prefix', 'phone', 'socials', 'colors', 'tone', 'sector', 'language', 'assets_url'];
 
+    /** I campi del kit che il CRM mostra anche a kit spento: recapiti e social. */
+    public const CRM_FIELDS = ['contacts', 'socials'];
+
     /** Le sezioni ATECO 2025 / NACE Rev. 2.1: la stessa lettera in tutta l'UE. */
     public const SECTORS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U'];
 
@@ -47,8 +50,8 @@ final class BrandData
     public const MAX_DOMAINS = 10;
     public const MAX_CONTACTS = 20;
 
-    /** I social di base; altri con `addSocial()`. */
-    public const SOCIALS = ['facebook', 'instagram', 'linkedin', 'x', 'tiktok', 'youtube', 'pinterest', 'whatsapp'];
+    /** I social di base; altri con `addSocial()`. La lista è di `Socials`, comune a brand e persone. */
+    public const SOCIALS = Socials::NETWORKS;
 
     /**
      * Le caselle di posta generica e le PEC dei gestori: un'email da qui non
@@ -85,9 +88,6 @@ final class BrandData
 
     /** Al massimo tanti colori in un brand kit. */
     public const MAX_COLORS = 12;
-
-    /** @var array<string, string> social aggiunti: chiave => etichetta */
-    private static array $extraSocials = [];
 
     /** @var list<string> caselle generiche aggiunte */
     private static array $extraProviders = [];
@@ -150,23 +150,13 @@ final class BrandData
      */
     public static function socials(): array
     {
-        $out = [];
-
-        foreach (self::SOCIALS as $key) {
-            $out[$key] = (string) __t('contacts.brand_social_'.$key);
-        }
-
-        return $out + self::$extraSocials;
+        return Socials::networks();
     }
 
     /** Aggiunge un social (es. `threads`). Un modulo lo chiama al boot, un sito in `custom/function`. */
     public static function addSocial(string $key, string $label): void
     {
-        $key = strtolower(trim($key));
-
-        if (preg_match('/^[a-z0-9_]{1,40}$/', $key) === 1) {
-            self::$extraSocials[$key] = $label;
-        }
+        Socials::add($key, $label);
     }
 
     /** Aggiunge una casella di posta generica (es. `azienda-di-hosting.it`). */
@@ -354,26 +344,7 @@ final class BrandData
      */
     public static function socialLinks(mixed $value): ?array
     {
-        $out = [];
-        $known = self::socials();
-
-        foreach (is_array($value) ? $value : [] as $key => $item) {
-            [$network, $url] = is_array($item) ? [$item['network'] ?? '', $item['url'] ?? ''] : [$key, $item];
-            $network = is_scalar($network) ? strtolower(trim((string) $network)) : '';
-            $url = self::url($url);
-
-            if ($url === '') {
-                continue;
-            }
-
-            if ($url === null || !array_key_exists($network, $known)) {
-                return null;
-            }
-
-            $out[$network] = $url;
-        }
-
-        return $out;
+        return Socials::clean($value);
     }
 
     /**
@@ -421,7 +392,7 @@ final class BrandData
     }
 
     /**
-     * I recapiti del brand: righe `kind` (`email` / `phone`), `email` oppure
+     * I recapiti del brand: righe `kind` (`email` o un tipo di telefono: `phone`, `mobile`, `whatsapp`), `email` oppure
      * `phone_prefix` + `phone`, `label` facoltativa (un tipo ufficio di `ContactRelations::departments()`). Le righe vuote si
      * saltano, i doppioni pure. Null se una riga non va o sono troppe.
      *
@@ -440,7 +411,7 @@ final class BrandData
             $kind = is_scalar($row['kind'] ?? null) ? (string) $row['kind'] : '';
             $label = self::officeType($row['label'] ?? '');
 
-            if ($kind === ContactPoints::PHONE) {
+            if (ContactPoints::isPhone($kind)) {
                 $phone = ContactPoints::phoneNumber($row['phone'] ?? '');
                 $prefix = ContactPoints::phonePrefix($row['phone_prefix'] ?? '');
 
@@ -515,14 +486,26 @@ final class BrandData
      * social, un servizio di siti (`facebook.com/lapiana`, `x.wixsite.com`) o
      * una casella generica: lì il dominio non è del brand.
      *
+     * Con `$primaryOnly` (il CRM spento: il form mostra un'email e un telefono
+     * soli e nessun social) i dati in più non si perdono: `socials` non si
+     * tocca e i recapiti salvati di `$stored` oltre la prima email e il primo
+     * telefono restano in coda a quelli postati.
+     *
+     * Con `$crm` e senza kit passano anche recapiti e social (`CRM_FIELDS`).
+     *
      * @param array<string, mixed> $values
+     * @param array<string, mixed> $stored la riga salvata del brand (serve con `$primaryOnly`)
      * @return array{0: array<string, string>, 1: array<string, string>}
      */
-    public static function clean(array $values, bool $kit): array
+    public static function clean(array $values, bool $kit, array $stored = [], bool $primaryOnly = false, bool $crm = false): array
     {
         $out = [];
         $errors = [];
-        $fields = $kit ? [...self::BASE_FIELDS, ...self::KIT_FIELDS] : self::BASE_FIELDS;
+        $fields = [...self::BASE_FIELDS, ...($kit ? self::KIT_FIELDS : ($crm ? self::CRM_FIELDS : []))];
+
+        if ($primaryOnly) {
+            $fields = array_values(array_diff($fields, ['socials']));
+        }
 
         foreach ($fields as $field) {
             if (!array_key_exists($field, $values)) {
@@ -570,6 +553,10 @@ final class BrandData
             }
         }
 
+        if ($primaryOnly && array_key_exists('contacts', $out)) {
+            $out['contacts'] = (string) self::json(self::withStoredExtras(self::decodeList($out['contacts']), $stored));
+        }
+
         // I recapiti in lista; le colonne singole tengono la prima email e il primo telefono.
         if (array_key_exists('contacts', $out)) {
             $first = ['email' => '', 'phone_prefix' => '', 'phone' => ''];
@@ -577,7 +564,7 @@ final class BrandData
             foreach (self::decodeList($out['contacts']) as $row) {
                 if (($row['kind'] ?? '') === ContactPoints::EMAIL && $first['email'] === '') {
                     $first['email'] = (string) $row['email'];
-                } elseif (($row['kind'] ?? '') === ContactPoints::PHONE && $first['phone'] === '') {
+                } elseif (ContactPoints::isPhone($row['kind'] ?? '') && $first['phone'] === '') {
                     $first['phone_prefix'] = (string) $row['phone_prefix'];
                     $first['phone'] = (string) $row['phone'];
                 }
@@ -656,6 +643,47 @@ final class BrandData
             ['kind' => ContactPoints::EMAIL, 'email' => $brand['email'] ?? ''],
             ['kind' => ContactPoints::PHONE, 'phone_prefix' => $brand['phone_prefix'] ?? '', 'phone' => $brand['phone'] ?? ''],
         ]) ?? [];
+    }
+
+    /**
+     * I recapiti postati da un form con un'email e un telefono soli, più
+     * quelli salvati che il form non mostrava (tutto oltre la prima email e
+     * il primo telefono), senza doppioni.
+     *
+     * @param list<array<string, string>> $posted
+     * @param array<string, mixed> $stored
+     * @return list<array<string, string>>
+     */
+    private static function withStoredExtras(array $posted, array $stored): array
+    {
+        $out = [];
+        $shown = [];
+
+        // Contano solo la prima email e il primo telefono postati.
+        foreach ($posted as $row) {
+            $family = ContactPoints::family($row['kind'] ?? '');
+
+            if (!isset($shown[$family])) {
+                $shown[$family] = true;
+                $out[] = $row;
+            }
+        }
+
+        $first = [];
+
+        foreach (self::contactsOf($stored) as $row) {
+            $family = ContactPoints::family($row['kind'] ?? '');
+
+            // Il primo di ogni famiglia era quello mostrato: lo sostituisce il valore postato.
+            if (!isset($first[$family])) {
+                $first[$family] = true;
+                continue;
+            }
+
+            $out[] = $row;
+        }
+
+        return array_slice(self::contacts($out) ?? $out, 0, self::MAX_CONTACTS);
     }
 
     /** @return array<int|string, mixed> */

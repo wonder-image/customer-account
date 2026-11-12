@@ -47,6 +47,15 @@ final class AccountBilling
             ContactPoints::dropOrphanDepartments($id);
         }
 
+        // Il telefono della persona: niente doppioni con i contatti in più, niente uffici orfani.
+        if ($model === Contact::class && ($result->success ?? false) && array_key_exists('phone', $values)) {
+            try {
+                ContactPoints::primaryWritten(ContactPoints::CONTACT, $id);
+            } catch (\Throwable) {
+                return (object) ['success' => false, 'messages' => [(string) __t('account.errors.save')]];
+            }
+        }
+
         return ($result->success ?? false)
             ? (object) ['success' => true, 'messages' => []]
             : (object) ['success' => false, 'messages' => [(string) __t('account.errors.save')]];

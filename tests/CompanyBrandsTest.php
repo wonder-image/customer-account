@@ -283,13 +283,31 @@ check('CompanyResource: il repeater dei brand è il primo campo, si salva solo s
     CompanyResource::syncRepeaterRelations(1, ['company_brands_form' => '1']);
 
     return $names[0] === 'brands' && $names[1] === 'company_brands_form'
-        && $columns === ['brand_id', 'role', 'is_default']
+        && $columns === ['brand_id', 'role']
         && !isset($stripped['brands']) && !isset($stripped['company_brands_form'])
         && !array_key_exists('brands', CompanyResource::repeaterRelations())
         && $saved === [1, 2] && $untouched === [1, 2]
-        && $rows === [['brand_id' => 2, 'role' => 'intermediary', 'is_default' => 'false'], ['brand_id' => 1, 'role' => 'owner', 'is_default' => 'true']]
+        && $rows === [['brand_id' => 2, 'role' => 'intermediary'], ['brand_id' => 1, 'role' => 'owner']]
         && CompanyBrands::idsOf(1) === [] && CompanyBrands::idsOf(2) === []
         && CompanyResource::withBrandValues(['id' => 2])['brands'] === [];
+});
+
+check('form senza «Predefinito»: il primo brand è il predefinito, quello di prima resta finché c\'è, poi vale il primo', function () use ($seed) {
+    Query::reset($seed());
+    $post = static fn (array $ids): array => ['company_brands_form' => '1', 'brands' => array_map(
+        static fn (int $id): array => ['brand_id' => (string) $id, 'role' => 'owner'],
+        $ids
+    )];
+    CompanyResource::syncRepeaterRelations(1, $post([2, 1]));
+    $first = CompanyBrands::defaultOf(1);
+    // Scelto da codice: il form che non lo posta lo tiene, anche in un altro ordine.
+    CompanyBrands::sync(1, [['brand_id' => 2], ['brand_id' => 1, 'is_default' => 'true']]);
+    CompanyResource::syncRepeaterRelations(1, $post([2, 1]));
+    $kept = CompanyBrands::defaultOf(1);
+    // Tolto il predefinito, vale il primo rimasto.
+    CompanyResource::syncRepeaterRelations(1, $post([2]));
+
+    return $first === 2 && $kept === 1 && CompanyBrands::defaultOf(1) === 2;
 });
 
 check('Commissioner: brand, poi ragione sociale, poi persona', function () use ($seed) {

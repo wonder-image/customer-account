@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 require __DIR__.'/support/FakeDb.php';
 require __DIR__.'/bootstrap.php';
+
+// Il riquadro a righe è quello con il CRM acceso (spento: un'email e un telefono soli, vedi CrmContactsTest).
+\Wonder\Plugin\CustomerAccount\Support\Crm::enable();
 // I prefissi noti del framework (`phonePrefix()`), per separare quello di un telefono storico.
 require_once WI_APP_ROOT.'/app/function/other/geo.php';
 
@@ -115,7 +118,7 @@ check('telefono storico: «+39 333…» si separa col prefisso noto; un numero n
     $anna = ContactPoints::all(ContactPoints::CONTACT, 2);
     $ada = ContactPoints::all(ContactPoints::CONTACT, 3);
 
-    return $anna[1] === ['kind' => 'phone', 'value' => '3331112222', 'phone_prefix' => '+39', 'label' => '', 'is_primary' => true, 'locked' => false, 'departments' => []]
+    return $anna[1] === ['kind' => 'phone', 'value' => '3331112222', 'phone_prefix' => '+39', 'label' => '', 'is_primary' => true, 'locked' => false, 'access' => false, 'departments' => [], 'department' => '']
         && $ada[0]['value'] === 'Mario Rossi@x.it' && $ada[0]['locked'] === true
         && $ada[1]['value'] === '12 int. 4' && $ada[1]['phone_prefix'] === '+39';
 });

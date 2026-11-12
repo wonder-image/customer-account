@@ -4,8 +4,11 @@
  *
  * Le colonne per tipo (email o prefisso e numero) le mostra e nasconde il
  * framework (`visibleWhen('kind', …)`), oppure il riquadro è diviso in un
- * elenco per tipo e il tipo è un campo nascosto. Qui restano un principale per tipo, la riga
- * dell'email di accesso bloccata e il nome dell'attività scelta da Google.
+ * elenco per tipo e il tipo è un campo nascosto. Qui restano la riga
+ * dell'email di accesso bloccata, il nome dell'attività scelta da Google e il
+ * conto dei brand dell'azienda: con più di uno il campo nascosto
+ * `data-ca-brands-many` vale «1» e il framework mostra i «Brand seguiti» dei
+ * referenti (`visibleWhen`).
  * Le regole vere stanno sul server (`ContactPoints::split()`): qui c'è solo
  * quello che serve a vederle subito.
  */
@@ -20,7 +23,7 @@
         // Una tendina (riquadro unico) o un campo nascosto con il tipo fisso (elenchi per tipo).
         var kind = row && row.querySelector('[data-ca-point-kind]');
         if (!kind) { return ''; }
-        return (kind.getAttribute('data-ca-point-kind') || kind.value) === 'phone' ? 'phone' : 'email';
+        return (kind.getAttribute('data-ca-point-kind') || kind.value) === 'email' ? 'email' : 'phone';
     }
 
     function emit(el) {
@@ -57,6 +60,28 @@
         });
     }
 
+    // Quanti brand diversi ha scelto l'azienda nelle righe dello stesso form.
+    function refreshBrands() {
+        document.querySelectorAll('[data-ca-brands-many]').forEach(function (flag) {
+            var scope = flag.form || document;
+            var selects = scope.querySelectorAll('[data-ca-company-brand]');
+            // Senza le righe dei brand nel form vale il conto fatto dal server.
+            if (!selects.length && !flag.hasAttribute('data-ca-brands-seen')) { return; }
+            flag.setAttribute('data-ca-brands-seen', 'true');
+
+            var seen = {};
+            selects.forEach(function (select) {
+                if (!select.disabled && String(select.value || '') !== '') { seen[select.value] = true; }
+            });
+
+            var value = Object.keys(seen).length > 1 ? '1' : '0';
+            if (flag.value !== value) {
+                flag.value = value;
+                emit(flag);
+            }
+        });
+    }
+
     document.addEventListener('change', function (event) {
         var target = event.target;
         if (!target || !target.matches) { return; }
@@ -65,6 +90,8 @@
             var row = rowOf(target);
             if (row) { refreshRow(row); }
         }
+
+        if (target.matches('[data-ca-company-brand]')) { refreshBrands(); }
     });
 
     /*
@@ -120,20 +147,30 @@
     }, true);
 
     // Le righe aggiunte dopo (repeater) partono come le altre.
+    var brandsChanged = false;
+
     if (typeof MutationObserver === 'function') {
         new MutationObserver(function (mutations) {
             mutations.forEach(function (mutation) {
                 mutation.addedNodes.forEach(function (node) {
                     if (node.nodeType === 1) { refreshAll(node.matches && node.matches('.wi-repeater-row') ? node.parentElement : node); }
                 });
+                // Una riga dei brand aggiunta o tolta cambia il conto.
+                if (mutation.addedNodes.length || mutation.removedNodes.length) { brandsChanged = true; }
             });
+
+            if (brandsChanged) {
+                brandsChanged = false;
+                refreshBrands();
+            }
         }).observe(document.documentElement, { childList: true, subtree: true });
     }
 
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', function () { refreshAll(document); });
+        document.addEventListener('DOMContentLoaded', function () { refreshAll(document); refreshBrands(); });
     } else {
         refreshAll(document);
+        refreshBrands();
     }
 
 })();

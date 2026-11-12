@@ -33,7 +33,8 @@
             "Wonder\\Plugin\\CustomerAccount\\Migrations\\CompanySplitMigration",
             "Wonder\\Plugin\\CustomerAccount\\Migrations\\CompanyBrandCodesMigration",
             "Wonder\\Plugin\\CustomerAccount\\Migrations\\RelationDepartmentsMigration",
-            "Wonder\\Plugin\\CustomerAccount\\Migrations\\PointOfficeTypesMigration"
+            "Wonder\\Plugin\\CustomerAccount\\Migrations\\PointOfficeTypesMigration",
+            "Wonder\\Plugin\\CustomerAccount\\Migrations\\CrmContactPointsMigration"
         ]
     },
     "views": {

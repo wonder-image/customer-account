@@ -31,7 +31,7 @@ class CompanyPointDepartment extends Model
     {
         return [
             Column::key('company_id')->int()->null(false)->foreign(Company::$table),
-            Column::key('kind')->enum(['email', 'phone'])->default('email'),
+            Column::key('kind')->enum(['email', 'phone', 'mobile', 'whatsapp'])->default('email'),
             Column::key('value')->length(190)->null(false),
             // Testo e non enum: le aree si estendono con `ContactRelations::addDepartment()`.
             Column::key('department')->length(40)->null(false),
