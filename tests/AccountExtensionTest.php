@@ -158,6 +158,18 @@ check('overview senza scheda: righe invariate', function () use ($fresh, $user) 
     return $ext->overviewRows($rows, $user) === $rows;
 });
 
+check('utente senza telefono: dati personali e panoramica mostrano quello della scheda', function () use ($fresh, $scheda) {
+    $fresh(new SoloDatiPersonali(), $ext = new SchedaFinta(['phone' => '3330000000'] + $scheda));
+    $rows = [['key' => 'personal', 'columns' => [['label' => 'nome', 'value' => 'Ada'], ['label' => 'account.personal.phone', 'value' => 'vuoto']]]];
+    $guest = (object) ['id' => 1, 'name' => 'Ada', 'phone' => ''];
+    $own = (object) ['id' => 1, 'name' => 'Ada', 'phone' => '+393339999999'];
+    $phone = static fn (array $out): string => (string) end($out[0]['columns'])['value'];
+    return $phone($ext->personalRows($rows, $guest)) === '+39 3330000000'
+        && $phone($ext->overviewRows($rows, $guest)) === '+39 3330000000'
+        && $phone($ext->personalRows($rows, $own)) === 'vuoto'
+        && $phone($ext->overviewRows($rows, $own)) === 'vuoto';
+});
+
 check('estensione registrata una volta sola per classe', function () use ($fresh, $named, $scheda) {
     $fresh(new AccountPanel(), new SchedaFinta($scheda));
     $count = count(Route::all());

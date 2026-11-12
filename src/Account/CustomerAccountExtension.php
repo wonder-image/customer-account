@@ -65,6 +65,7 @@ class CustomerAccountExtension extends BaseAccountExtension
         if ($contactId <= 0) {
             return $rows;
         }
+        $rows = self::withContactPhone($rows, $user, $contact);
         $value = static fn (string $text): string => trim($text) !== '' ? trim($text) : (string) __t('account.overview.not_set');
         $own = [];
 
@@ -89,6 +90,7 @@ class CustomerAccountExtension extends BaseAccountExtension
     public function personalRows(array $rows, object $user): array
     {
         $contact = $this->contact($user);
+        $rows = self::withContactPhone($rows, $user, $contact);
         $at = self::rowIndex($rows, 'personal');
         if ($at !== null) {
             $birth = (string) ($contact['birth_date'] ?? '');
@@ -196,6 +198,24 @@ class CustomerAccountExtension extends BaseAccountExtension
     private function billing(array $contact): bool
     {
         return AccountRoutes::panel()->enabled('billing') && (int) ($contact['id'] ?? 0) > 0;
+    }
+
+    /** Utente senza telefono (ordine da ospite): la riga dei dati personali mostra quello della scheda. */
+    private static function withContactPhone(array $rows, object $user, array $contact): array
+    {
+        $phone = trim((string) ($contact['phone'] ?? ''));
+        $at = self::rowIndex($rows, 'personal');
+        if ($at === null || $phone === '' || trim((string) ($user->phone ?? '')) !== '') {
+            return $rows;
+        }
+        $rows = array_values($rows);
+        $label = (string) __t('account.personal.phone');
+        foreach ((array) ($rows[$at]['columns'] ?? []) as $i => $column) {
+            if (($column['label'] ?? null) === $label) {
+                $rows[$at]['columns'][$i]['value'] = str_starts_with($phone, '+') ? $phone : trim((string) ($contact['phone_prefix'] ?? '').' '.$phone);
+            }
+        }
+        return $rows;
     }
 
     /** Inserisce `$own` dopo la chiave `$after`, o in coda se non c'è. */

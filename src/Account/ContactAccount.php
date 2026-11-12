@@ -61,6 +61,10 @@ class ContactAccount
             if (!empty($input['phone'])) {
                 $values['phone_prefix'] = preg_replace('/[^0-9+]/', '', (string) ($input['phone_prefix'] ?? ''));
                 $values['phone'] = preg_replace('/\D+/', '', (string) $input['phone']);
+                // Il campo del sito è «Cellulare»: un telefono che nasce da qui prende quel tipo.
+                if (!$exists || trim((string) ($contact['phone'] ?? '')) === '') {
+                    $values['phone_kind'] = ContactPoints::MOBILE;
+                }
             }
         }
 

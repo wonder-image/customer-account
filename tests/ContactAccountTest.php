@@ -34,7 +34,13 @@ check('link senza scheda: la crea con i dati dell\'utente e il telefono pulito',
     $contact = $row($link->contact_id);
     return $link->success && $link->reason === '' && $contact['name'] === 'Ada' && $contact['email'] === 'ada@example.com'
         && (int) $contact['user_id'] === 7 && $contact['phone'] === '3331234567' && $contact['phone_prefix'] === '+39'
-        && $contact['is_customer'] === 'true' && $contact['active'] === 'true';
+        && $contact['is_customer'] === 'true' && $contact['active'] === 'true' && $contact['phone_kind'] === 'mobile';
+});
+
+check('telefono che nasce dal sito su una scheda senza telefono: tipo cellulare', function () use ($guest, $row) {
+    Query::reset(['contacts' => [3 => ['phone' => '', 'phone_kind' => 'phone'] + $guest]]);
+    $link = ContactAccount::link(7, ['phone_prefix' => '+39', 'phone' => '3331234567']);
+    return $link->success && $row(3)['phone'] === '3331234567' && $row(3)['phone_kind'] === 'mobile';
 });
 
 check('link riusa la scheda con la stessa email: identità riscritta, telefono vuoto non la svuota', function () use ($guest, $row) {
