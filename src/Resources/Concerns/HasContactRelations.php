@@ -95,8 +95,8 @@ trait HasContactRelations
                     ->columnSpan(3),
                 ContactRelations::COMPANY
             ),
-            RepeaterColumn::key('job_title')->text()->label(static::relationText('job_title'))->columnSpan(3),
-            static::officeColumn(3),
+            RepeaterColumn::key('job_title')->text()->label(static::relationText('job_title'))->columnSpan(2),
+            static::officeColumn(2),
             static::legalRepresentativeColumn(),
             ...static::workContactColumns(),
             static::relationBrandsColumn(),
@@ -114,8 +114,8 @@ trait HasContactRelations
                     ->columnSpan(3),
                 ContactRelations::PERSON
             ),
-            RepeaterColumn::key('job_title')->text()->label(static::relationText('job_title'))->columnSpan(3),
-            static::officeColumn(3),
+            RepeaterColumn::key('job_title')->text()->label(static::relationText('job_title'))->columnSpan(2),
+            static::officeColumn(2),
             static::legalRepresentativeColumn(),
             ...static::workContactColumns(),
         ], static::relationText('add_company'));
@@ -132,7 +132,7 @@ trait HasContactRelations
             ->checkbox()
             ->label(static::relationText('legal_representative'))
             ->attribute('value="true"')
-            ->columnSpan(3);
+            ->columnSpan(2);
     }
 
     /**
