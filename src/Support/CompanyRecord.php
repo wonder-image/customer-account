@@ -18,11 +18,13 @@ use Wonder\Plugin\CustomerAccount\Models\CompanyBrand;
  * `SCHEMA` 5: come `PartyRecord` 4 (tutti i contatti con `is_primary`, qui
  * anche con le aree `departments`; contatti di lavoro dei referenti; geo
  * della fatturazione).
+ * `SCHEMA` 6: come `PartyRecord` 5 (i referenti portano
+ * `is_legal_representative`).
  */
 final class CompanyRecord extends PartyRecord
 {
     public const ENTITY = 'company';
-    public const SCHEMA = 5;
+    public const SCHEMA = 6;
 
     public static function entity(): string
     {

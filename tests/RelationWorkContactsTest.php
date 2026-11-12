@@ -145,7 +145,7 @@ check('record: i legami portano i contatti di lavoro; validate rifiuta un\'email
     ContactRelations::sync(ContactRelations::COMPANY, 1, [['person_id' => '2', 'email' => 'anna@rossi.test', 'phone' => '021234567', 'phone_prefix' => '+39']]);
     $record = CompanyRecord::from(1);
 
-    return $record['schema'] === 5
+    return $record['schema'] === 6
         && $record['relations'][0]['work_email'] === 'anna@rossi.test' && $record['relations'][0]['work_phone'] === '021234567' && $record['relations'][0]['work_phone_prefix'] === '+39'
         && CompanyRecord::validate(['business_name' => 'X', 'relations' => [['person_id' => 2, 'work_email' => 'rotta'], ['person_id' => 3, 'work_email' => 'ok@rossi.test']]]) === ['relations.0' => 'invalid'];
 });

@@ -162,7 +162,7 @@ check('record: email principale invariata, tutti i contatti in emails e phones (
     $company = CompanyRecord::from(2);
     $in = ContactRecord::fromArray(['name' => 'X', 'emails' => [['value' => 'no'], 'x'], 'phones' => [['value' => '02 1x']]]);
 
-    return $person['schema'] === 4 && $person['email'] === 'anna@rossi.test'
+    return $person['schema'] === 5 && $person['email'] === 'anna@rossi.test'
         && $person['emails'] === [['value' => 'anna@rossi.test', 'label' => '', 'is_primary' => true], ['value' => 'b@rossi.test', 'label' => 'billing', 'is_primary' => false]]
         && $person['phones'] === [
             ['kind' => 'phone', 'phone_prefix' => '+39', 'value' => '3331112222', 'label' => '', 'is_primary' => true],

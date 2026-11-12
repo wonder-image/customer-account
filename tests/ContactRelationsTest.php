@@ -48,8 +48,38 @@ check('normalize: scarta vuoti, doppioni e controparti inesistenti; un solo prin
     ], [], 'company_id', 1, [2, 3]);
 
     return count($rows) === 2
-        && $rows[0] === ['person_id' => 2, 'job_title' => 'Acquisti', 'is_primary' => 'true', 'receives_documents' => 'true', 'access' => 'buyer', 'email' => '', 'phone_prefix' => '', 'phone' => '', 'deleted' => 'false']
+        && $rows[0] === ['person_id' => 2, 'job_title' => 'Acquisti', 'is_primary' => 'true', 'receives_documents' => 'true', 'is_legal_representative' => 'false', 'access' => 'buyer', 'email' => '', 'phone_prefix' => '', 'phone' => '', 'deleted' => 'false']
         && $rows[1]['person_id'] === 3 && $rows[1]['is_primary'] === 'false' && $rows[1]['access'] === 'none' && !isset($rows[1]['department']);
+});
+
+check('rappresentante legale: la spunta del form vale, senza chiave un legame vivo resta e uno nuovo no', function () {
+    $stored = [['id' => 9, 'person_id' => 2, 'deleted' => 'false', 'is_legal_representative' => 'true'], ['id' => 7, 'person_id' => 4, 'deleted' => 'true', 'is_legal_representative' => 'true']];
+    $flag = static fn (array $row): string => ContactRelations::normalize([$row], $stored, 'company_id', 1, [2, 3, 4])[0]['is_legal_representative'];
+
+    return $flag(['person_id' => 3, 'is_legal_representative' => 'true']) === 'true'
+        && $flag(['person_id' => 2, 'is_legal_representative' => '']) === 'false'
+        && $flag(['person_id' => 2]) === 'true'
+        && $flag(['person_id' => 3]) === 'false'
+        && $flag(['person_id' => 4]) === 'false';
+});
+
+check('rappresentante legale: salvato sul legame, più d\'uno per azienda, letto da legalRepresentativesOf e dai Record', function () use ($tables, $row) {
+    $seed = $tables();
+    $seed['contacts'][5] = $row(5, ['name' => 'Lia', 'surname' => 'Gialli']);
+    Query::reset($seed);
+    $synced = ContactRelations::sync(ContactRelations::COMPANY, 1, [
+        ['person_id' => '2', 'is_legal_representative' => 'true'],
+        ['person_id' => '3', 'is_legal_representative' => ''],
+        ['person_id' => '5', 'is_legal_representative' => 'true'],
+    ]);
+    $legal = array_map(static fn (array $r): int => (int) $r['person_id'], ContactRelations::legalRepresentativesOf(1));
+    $record = CompanyRecord::from(1);
+    $person = ContactRecord::from(3);
+
+    return count($synced) === 3 && $legal === [2, 5]
+        && array_column($record['relations'], 'is_legal_representative') === [true, false, true]
+        && array_column($person['relations'], 'is_legal_representative') === [false]
+        && ContactRelations::legalRepresentativesOf(4) === [];
 });
 
 check('normalize: una coppia già esistente riprende id e accesso, preferendo la riga viva', function () {
@@ -251,7 +281,7 @@ check('CompanyRecord::from: campi, referenti con accesso, id esterni', function 
     return $record['schema'] === CompanyRecord::SCHEMA && $record['entity'] === 'company'
         && $record['business_name'] === 'Rossi srl' && $record['pi'] === '01234567890' && $record['cap'] === ''
         && $record['is_supplier'] === true && !array_key_exists('name', $record)
-        && $record['relations'] === [['person_id' => 2, 'job_title' => 'Acquisti', 'department' => 'administration', 'departments' => ['administration', 'purchasing'], 'is_primary' => true, 'receives_documents' => true, 'access' => 'admin', 'work_email' => '', 'work_phone_prefix' => '', 'work_phone' => '', 'points' => []]]
+        && $record['relations'] === [['person_id' => 2, 'job_title' => 'Acquisti', 'department' => 'administration', 'departments' => ['administration', 'purchasing'], 'is_primary' => true, 'receives_documents' => true, 'is_legal_representative' => false, 'access' => 'admin', 'work_email' => '', 'work_phone_prefix' => '', 'work_phone' => '', 'points' => []]]
         && array_column($record['external_ids'], 'external_id') === ['hs-1']
         && json_encode($record) !== false && CompanyRecord::from(99) === null;
 });
@@ -271,7 +301,7 @@ check('ContactRecord::from: persona con aziende e consensi', function () use ($t
 
     return $record['entity'] === 'contact' && $record['name'] === 'Anna' && $record['birth_date'] === '1990-01-02'
         && !array_key_exists('business_name', $record) && $record['user_id'] === 8
-        && $record['relations'] === [['company_id' => 1, 'job_title' => '', 'department' => '', 'departments' => [], 'is_primary' => true, 'receives_documents' => false, 'access' => 'buyer', 'work_email' => '', 'work_phone_prefix' => '', 'work_phone' => '', 'points' => []]]
+        && $record['relations'] === [['company_id' => 1, 'job_title' => '', 'department' => '', 'departments' => [], 'is_primary' => true, 'receives_documents' => false, 'is_legal_representative' => false, 'access' => 'buyer', 'work_email' => '', 'work_phone_prefix' => '', 'work_phone' => '', 'points' => []]]
         && $record['consents'] === ['newsletter' => 'granted'];
 });
 

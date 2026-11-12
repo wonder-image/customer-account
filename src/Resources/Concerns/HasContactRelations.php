@@ -15,6 +15,7 @@ use Wonder\Plugin\CustomerAccount\Support\CompanyBrands;
 use Wonder\Plugin\CustomerAccount\Support\ContactPoints;
 use Wonder\Plugin\CustomerAccount\Support\ContactRelations;
 use Wonder\Plugin\CustomerAccount\Support\Crm;
+use Wonder\Plugin\CustomerAccount\Support\EmptyRepeater;
 
 /**
  * Il repeater dei legami azienda/persona di una Resource della rubrica:
@@ -96,6 +97,7 @@ trait HasContactRelations
             ),
             RepeaterColumn::key('job_title')->text()->label(static::relationText('job_title'))->columnSpan(3),
             static::officeColumn(3),
+            static::legalRepresentativeColumn(),
             ...static::workContactColumns(),
             static::relationBrandsColumn(),
         ], static::relationText('add_person'));
@@ -114,8 +116,23 @@ trait HasContactRelations
             ),
             RepeaterColumn::key('job_title')->text()->label(static::relationText('job_title'))->columnSpan(3),
             static::officeColumn(3),
+            static::legalRepresentativeColumn(),
             ...static::workContactColumns(),
         ], static::relationText('add_company'));
+    }
+
+    /**
+     * La spunta «Rappresentante legale» del legame: vale per quell'azienda
+     * soltanto, più persone possono esserlo. Non dà accesso e non cambia
+     * ufficio né brand seguiti.
+     */
+    protected static function legalRepresentativeColumn(): Input
+    {
+        return RepeaterColumn::key('is_legal_representative')
+            ->checkbox()
+            ->label(static::relationText('legal_representative'))
+            ->attribute('value="true"')
+            ->columnSpan(3);
     }
 
     /**
@@ -130,11 +147,13 @@ trait HasContactRelations
     {
         if (Crm::enabled()) {
             return [
-                RepeaterColumn::key('points')
-                    ->repeater(static::pointColumns())
-                    ->label(static::relationText('work_contacts'))
-                    ->repeaterAddLabel(static::relationText('point_add'))
-                    ->columnSpan(12),
+                EmptyRepeater::on(
+                    RepeaterColumn::key('points')
+                        ->repeater(static::pointColumns())
+                        ->label(static::relationText('work_contacts'))
+                        ->repeaterAddLabel(static::relationText('point_add'))
+                        ->columnSpan(12)
+                ),
             ];
         }
 
@@ -199,7 +218,7 @@ trait HasContactRelations
         }
     }
 
-    /** Una riga senza controparte porta qualcosa (ruolo, email, telefono, un recapito)? L'ufficio ha un default e non conta. */
+    /** Una riga senza controparte porta qualcosa (ruolo, email, telefono, un recapito)? L'ufficio ha un default e non conta, la spunta del rappresentante legale nemmeno. */
     private static function relationRowFilled(array $row): bool
     {
         $values = [$row['job_title'] ?? '', $row['email'] ?? '', $row['phone'] ?? ''];
@@ -270,18 +289,20 @@ trait HasContactRelations
     /** @param list<Input> $columns */
     protected static function relationRepeater(string $key, string $parentColumn, array $columns, string $addLabel): Input
     {
-        return FormField::key($key)
-            ->repeater($columns)
-            ->relation(
-                RepeaterRelation::make(ContactRelation::$table, $parentColumn)
-                    ->model(ContactRelation::class)
-                    ->positionKey('position')
-                    ->softDelete(true)
-            )
-            ->nested()
-            ->repeaterSortable()
-            ->repeaterAddLabel($addLabel)
-            ->label('');
+        return EmptyRepeater::on(
+            FormField::key($key)
+                ->repeater($columns)
+                ->relation(
+                    RepeaterRelation::make(ContactRelation::$table, $parentColumn)
+                        ->model(ContactRelation::class)
+                        ->positionKey('position')
+                        ->softDelete(true)
+                )
+                ->nested()
+                ->repeaterSortable()
+                ->repeaterAddLabel($addLabel)
+                ->label('')
+        );
     }
 
     /** @var list<int> le controparti già legate alla scheda del form, lette da `hydrateRepeaterFormValues()` */
