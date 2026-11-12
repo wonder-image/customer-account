@@ -7,6 +7,7 @@ use Wonder\App\ResourceSchema\FormField;
 use Wonder\App\ResourceSchema\Input;
 use Wonder\App\ResourceSchema\RepeaterColumn;
 use Wonder\Plugin\CustomerAccount\Support\Socials;
+use Wonder\Plugin\CustomerAccount\Support\EmptyRepeater;
 
 /**
  * I «Social» di una scheda (colonna `socials`, JSON rete → URL): un repeater
@@ -26,14 +27,14 @@ trait HasSocials
     public static function socialFields(): array
     {
         return [
-            FormField::key(static::$socialsInput)
+            EmptyRepeater::on(FormField::key(static::$socialsInput)
                 ->repeater([
                     RepeaterColumn::key('network')->select(Socials::networks())->label((string) __t('contacts.brand_social_network'))->columnSpan(4),
                     RepeaterColumn::key('url')->url()->label((string) __t('contacts.brand_social_url'))->columnFill(),
                 ])
                 ->nested()
                 ->repeaterAddLabel((string) __t('contacts.brand_social_add'))
-                ->label((string) __t('contacts.person_socials')),
+                ->label((string) __t('contacts.person_socials'))),
             FormField::key(static::$socialsMarker)->hidden()->value('1'),
         ];
     }

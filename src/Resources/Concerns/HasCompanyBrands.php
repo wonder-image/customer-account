@@ -8,6 +8,7 @@ use Wonder\App\ResourceSchema\RepeaterColumn;
 use Wonder\Plugin\CustomerAccount\Models\CompanyBrandLink;
 use Wonder\Plugin\CustomerAccount\Resources\CompanyBrandResource;
 use Wonder\Plugin\CustomerAccount\Support\CompanyBrands;
+use Wonder\Plugin\CustomerAccount\Support\EmptyRepeater;
 
 /**
  * Il campo «Brand» di una Resource delle aziende: un repeater con il brand
@@ -43,7 +44,7 @@ trait HasCompanyBrands
     public static function brandFields(): array
     {
         return [
-            FormField::key(static::$brandsInput)
+            EmptyRepeater::on(FormField::key(static::$brandsInput)
                 ->repeater([
                     RepeaterColumn::key('brand_id')
                         ->selectSearch(['' => (string) __t('contacts.option_none')] + CompanyBrands::options())
@@ -60,7 +61,7 @@ trait HasCompanyBrands
                 ->nested()
                 ->repeaterSortable()
                 ->repeaterAddLabel((string) __t('contacts.brand_add_row'))
-                ->label((string) __t('contacts.brands_label')),
+                ->label((string) __t('contacts.brands_label'))),
             FormField::key(static::$brandsMarker)->hidden()->value('1'),
         ];
     }

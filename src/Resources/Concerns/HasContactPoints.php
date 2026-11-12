@@ -12,6 +12,7 @@ use Wonder\Plugin\CustomerAccount\Support\ContactPoints;
 use Wonder\Plugin\CustomerAccount\Resources\OfficeTypeResource;
 use Wonder\Plugin\CustomerAccount\Support\ContactRelations;
 use Wonder\Plugin\CustomerAccount\Support\Crm;
+use Wonder\Plugin\CustomerAccount\Support\EmptyRepeater;
 
 /**
  * I contatti di una Resource della rubrica.
@@ -290,7 +291,7 @@ trait HasContactPoints
         }
 
         return [
-            FormField::key(static::$pointsInput)
+            EmptyRepeater::on(FormField::key(static::$pointsInput)
                 ->repeater([
                     RepeaterColumn::key('kind')->select($kinds)->value(ContactPoints::EMAIL)
                         ->label((string) __t('contacts.point_kind'))->columnSpan(2),
@@ -303,7 +304,7 @@ trait HasContactPoints
                 ->nested()
                 ->repeaterSortable()
                 ->repeaterAddLabel((string) __t('contacts.point_add'))
-                ->label((string) __t('contacts.points_label')),
+                ->label((string) __t('contacts.points_label'))),
             FormField::key(static::$pointsMarker)->hidden()->value('1'),
         ];
     }

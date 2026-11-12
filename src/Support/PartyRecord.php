@@ -25,8 +25,9 @@ abstract class PartyRecord
      * 3: i legami portano `departments` (le aree), la scheda `emails` e `phones` (i recapiti in più).
      * 4: `emails` e `phones` sono tutti i contatti, il principale per primo con `is_primary`; i
      * legami portano `work_email`, `work_phone_prefix`, `work_phone`; la scheda `place_id`, `lat`, `lng`.
+     * 5: i legami portano `is_legal_representative`.
      */
-    public const SCHEMA = 4;
+    public const SCHEMA = 5;
 
     /** L'entità in `external_references` (`contact`, `company`). */
     abstract public static function entity(): string;
@@ -198,6 +199,7 @@ abstract class PartyRecord
                 'departments' => $row['departments'] ?? [],
                 'is_primary' => ($row['is_primary'] ?? 'false') === 'true',
                 'receives_documents' => ($row['receives_documents'] ?? 'false') === 'true',
+                'is_legal_representative' => ContactRelations::isLegalRepresentative($row),
                 'access' => ContactRelations::access($row['access'] ?? null),
                 'work_email' => (string) ($row['work_email'] ?? ''),
                 'work_phone_prefix' => (string) ($row['work_phone_prefix'] ?? ''),

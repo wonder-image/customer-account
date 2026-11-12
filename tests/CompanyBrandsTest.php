@@ -333,7 +333,7 @@ check('CompanyRecord: i brand legati con codice, slug, ruolo, predefinito e bran
 
     $base = array_flip(['id', 'code', 'slug', 'name', 'role', 'is_default', 'parent_id', 'parent_code']);
 
-    return $record['schema'] === 5 && array_map(static fn (array $brand): array => array_intersect_key($brand, $base), $record['brands']) === [
+    return $record['schema'] === 6 && array_map(static fn (array $brand): array => array_intersect_key($brand, $base), $record['brands']) === [
         ['id' => 2, 'code' => 'cbr_la-piana', 'slug' => 'la-piana', 'name' => 'La Piana', 'role' => 'licensee', 'is_default' => false, 'parent_id' => 1, 'parent_code' => 'cbr_rclass'],
         ['id' => 1, 'code' => 'cbr_rclass', 'slug' => 'rclass', 'name' => 'RClass', 'role' => 'owner', 'is_default' => true, 'parent_id' => 0, 'parent_code' => ''],
     ] && $record['brands'][0]['website'] === '' && $record['brands'][0]['socials'] === [] && $record['brands'][0]['colors'] === []

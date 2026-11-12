@@ -19,6 +19,8 @@ use Wonder\Sql\TableSchema as Column;
  * (più di una; la vecchia colonna `department` la copia
  * `Migrations\RelationDepartmentsMigration`). `receives_documents`,
  * `is_primary` e `access` restano qui: l'accesso non dipende mai dall'area.
+ * `is_legal_representative` dice che la persona è un rappresentante legale
+ * di quell'azienda (anche più d'uno): non dà accesso né altro.
  *
  * `email`, `phone_prefix`, `phone` sono i contatti di lavoro del referente
  * per questa azienda (facoltativi): a chi scrivere per lei. Non sono mai
@@ -59,6 +61,7 @@ class ContactRelation extends Model
             Column::key('job_title')->length(150),
             Column::key('is_primary')->enum(['true', 'false'])->default('false'),
             Column::key('receives_documents')->enum(['true', 'false'])->default('false'),
+            Column::key('is_legal_representative')->enum(['true', 'false'])->default('false'),
             Column::key('access')->enum(self::ACCESS)->default(self::ACCESS_NONE),
             Column::key('email')->length(190),
             Column::key('phone_prefix')->length(8),
@@ -83,6 +86,7 @@ class ContactRelation extends Model
             Field::key('job_title')->text(),
             Field::key('is_primary')->text()->sanitize(false),
             Field::key('receives_documents')->text()->sanitize(false),
+            Field::key('is_legal_representative')->text()->sanitize(false),
             Field::key('access')->text()->sanitize(false),
             // Già ripuliti da `ContactRelations::normalize()`.
             Field::key('email')->text()->sanitize(false),

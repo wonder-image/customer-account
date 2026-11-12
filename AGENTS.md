@@ -38,7 +38,15 @@ Le convenzioni del framework sono in `vendor/wonder-image/app/AGENTS.md`.
   un indirizzo senza brand vale per tutti (`company_address_brands`, solo da
   `CompanyAddresses`). Chi sceglie i destinatari di un documento usa
   `ContactRelations::peopleFor()`. Accesso, principale e `receives_documents`
-  restano sul legame: l'accesso non deriva mai dall'area.
+  restano sul legame: l'accesso non deriva mai dall'area. Sul legame c'è anche
+  `is_legal_representative` (spunta «Rappresentante legale» del form, più
+  d'uno per azienda): si legge con `ContactRelations::legalRepresentativesOf()`
+  / `isLegalRepresentative()` e non tocca accesso, aree né brand. Una riga
+  senza la chiave tiene il valore salvato.
+- Repeater senza righe: i repeater che possono restare vuoti passano da
+  `Support\EmptyRepeater::on()` (stato vuoto del framework, se c'è). Non
+  quelli del riquadro «Contatti» (`contactBoxFields()`,
+  `contactBoxByKindFields()`), che tengono la prima riga aperta.
 - Contatti (riquadro «Contatti», `HasContactPoints::contactBoxFields()`,
   marker `contact_box_form`): il principale di ogni tipo resta nelle colonne
   `email` / `phone_prefix` / `phone` (tutto il sistema legge quelle), gli
@@ -106,7 +114,7 @@ Le convenzioni del framework sono in `vendor/wonder-image/app/AGENTS.md`.
   porta, e `CompanyBrandResource`). Il committente di un progetto si salva con
   `Commissioner::resolve()`.
 - Integrazioni: `ContactRecord` / `CompanyRecord` (base `PartyRecord`,
-  `SCHEMA` 4, `CompanyRecord` 5, `entity_type` `contact` / `company`). Se
+  `SCHEMA` 5, `CompanyRecord` 6, `entity_type` `contact` / `company`). Se
   cambia la forma, alzare `SCHEMA` della classe che cambia.
 - Export: le Resource su `contacts` e `companies` usano `ContactExport::FORMATS` /
   `columns()` con `downloadAsText()`; niente colonne duplicate per Resource.

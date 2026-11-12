@@ -153,6 +153,9 @@ final class ContactRelations
      * `is_primary`, dal lato azienda resta principale solo la prima; dal lato
      * persona ogni riga è un'azienda diversa e tiene il suo (gli altri
      * referenti di quell'azienda lo perdono in `sync()`).
+     * `is_legal_representative` segue la stessa regola della chiave, ma un
+     * legame nuovo senza chiave non è rappresentante legale; più persone
+     * possono esserlo per la stessa azienda.
      *
      * Con `points` (le righe dei recapiti, vedi `sync()`) `email`,
      * `phone_prefix` e `phone` sono la prima email e il primo telefono della
@@ -213,6 +216,10 @@ final class ContactRelations
                 'job_title' => is_scalar($row['job_title'] ?? null) ? trim((string) $row['job_title']) : '',
                 'is_primary' => self::storedFlag($row, 'is_primary', $live ? $stored : null),
                 'receives_documents' => self::storedFlag($row, 'receives_documents', $live ? $stored : null),
+                // Senza la chiave: un legame vivo resta com'è, uno nuovo non è rappresentante legale.
+                'is_legal_representative' => array_key_exists('is_legal_representative', $row)
+                    ? self::flag($row['is_legal_representative'])
+                    : ($live ? self::flag($stored['is_legal_representative'] ?? 'false') : 'false'),
                 'access' => $access,
             ] + (array_key_exists('points', $row) ? self::mirror(self::cleanPoints($row['points'])) : self::workContacts($row, $stored ?? [])) + [
                 'deleted' => 'false',
@@ -288,6 +295,27 @@ final class ContactRelations
         }
 
         return $out;
+    }
+
+    /**
+     * I rappresentanti legali di un'azienda: le righe di `peopleOf()` con
+     * `is_legal_representative`, nell'ordine della scheda. È il punto unico
+     * per chi compila un documento (contratto, mandato, privacy).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public static function legalRepresentativesOf(int $companyId): array
+    {
+        return array_values(array_filter(
+            self::peopleOf($companyId),
+            static fn (array $row): bool => self::isLegalRepresentative($row)
+        ));
+    }
+
+    /** La riga di un legame (di `peopleOf()`, `companiesOf()` o del database) è di un rappresentante legale? */
+    public static function isLegalRepresentative(array $row): bool
+    {
+        return self::flag($row['is_legal_representative'] ?? 'false') === 'true';
     }
 
     /**
@@ -1508,6 +1536,7 @@ final class ContactRelations
             'job_title' => (string) ($stored['job_title'] ?? ''),
             'is_primary' => self::flag($stored['is_primary'] ?? 'false'),
             'receives_documents' => self::flag($stored['receives_documents'] ?? 'false'),
+            'is_legal_representative' => self::flag($stored['is_legal_representative'] ?? 'false'),
             'access' => self::access($stored['access'] ?? null),
             'email' => (string) ($stored['email'] ?? ''),
             'phone_prefix' => (string) ($stored['phone_prefix'] ?? ''),
