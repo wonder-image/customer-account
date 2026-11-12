@@ -129,7 +129,11 @@ Le convenzioni del framework sono in `vendor/wonder-image/app/AGENTS.md`.
   (`ContactAccount`, `AccountBilling::save()`, `afterEmailConfirmed()`) chiama dopo
   `ContactPoints::primaryWritten()`: niente doppioni con i contatti in più,
   niente uffici orfani; recapiti in più, social e `phone_kind` restano. Il
-  form degli indirizzi del pannello non ha «Presso» e non lo scrive.
+  form degli indirizzi del pannello non ha «Presso» e non lo scrive. Un
+  telefono che nasce dal sito su una scheda senza telefono prende il tipo
+  `mobile` (il campo è «Cellulare»); un telefono già salvato tiene il suo. Se
+  l'utente non ha telefono (ordine da ospite) i dati personali mostrano
+  quello della scheda (`CustomerAccountExtension::withContactPhone()`).
 - Test: `WI_APP=<app> php tests/run.php`. Chi passa dai Model richiede prima
   `tests/support/FakeDb.php` (database in memoria). Vedi `README.md`.
 - Testo visibile: mai «—», «--» o «–» come opzione vuota, valore mancante o
