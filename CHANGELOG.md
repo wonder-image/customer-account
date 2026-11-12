@@ -15,6 +15,8 @@
 
 ### Fixed
 
+- Pannello del cliente: cambiare il telefono (`ContactAccount::link()`, o la fatturazione della persona con `AccountBilling::save()`, usata anche dal checkout) o confermare la nuova email di accesso (`CustomerAccountExtension::afterEmailConfirmed()`) scriveva le colonne della scheda senza guardare i recapiti salvati dal backend. Ora passa da `ContactPoints::primaryWritten()`: un contatto in più uguale al nuovo principale non resta due volte (il telefono principale ne prende il tipo in `phone_kind`, così tiene i suoi uffici) e gli uffici del valore tolto se ne vanno. Gli altri recapiti in più, i social e `phone_kind` non si toccano, con il CRM acceso o spento (test). Un telefono vuoto continua a non svuotare quello salvato.
+- Indirizzi del pannello: «Presso» (`business_name`) non è nel form e `AccountAddresses::save()` non lo scrive, così una modifica dal pannello tiene il valore salvato dal backend (test).
 - Riquadro «Contatti»: salvare una scheda senza modifiche non cambia più i recapiti. Un contatto in più già salvato non sale a principale (e non perde l'etichetta) quando la scheda non ne aveva uno; il prefisso salvato senza telefono resta. `ContactPoints::split()` riceve i contatti salvati (`$saved`).
 - Form della persona: il «Paese» ha l'opzione vuota, così una scheda senza paese non mostra il primo dell'elenco (`Contact::billingFormSchema()`, `HasPartyColumns::countryOptional()`). In creazione resta il paese predefinito.
 
@@ -37,6 +39,7 @@
 
 ### Breaking
 
+- Testi tolti da `lang/{it,en}/contacts.json` perché nessun modulo li usa più: `is_primary`, `receives_documents`, `access`, `access_none`, `access_buyer`, `access_admin`, `new_name`, `new_surname`, `new_email`, `new_person`, `new_person_name`, `relation_person_exists`, `work_email`, `work_phone`, `brand_is_default`, `relations`, `people`, `brands_tooltip`, `departments`, `point_label`. Restano `point_label_*`, `department_*`, `work_phone_prefix`, `work_contacts*`. Un sito che li leggeva con `__t('contacts.…')` li definisce nei suoi `lang/`.
 - `HasContactRelations`: via `departmentsColumn()`, `relationFlagColumns()` e `relationPersonExistsMessage()`. Chi li ridefiniva o li chiamava va adeguato: l'ufficio è `officeColumn()` (colonna `department`), i flag non sono più colonne del form.
 - `HasContactPoints::contactFormScript()` restituisce un `RichText` invece di una stringa: tra i componenti di una card la stringa veniva scartata senza dire niente e lo script non arrivava nella pagina. Chi lo concatena a un HTML usa `ContactFormScript::html()`.
 - Riquadro «Contatti»: richiede `wonder-image/app` `2.4.0-beta.7` (`repeaterMinRows()`) e la lib `2.1.2-alpha.41`. Le colonne per tipo le nasconde il framework (`visibleWhen('kind', …)`), non più lo script del modulo; etichetta e «Si occupa di» passano nelle informazioni avanzate della riga.

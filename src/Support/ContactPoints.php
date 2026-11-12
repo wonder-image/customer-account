@@ -843,6 +843,59 @@ final class ContactPoints
         return $dropped;
     }
 
+    /**
+     * Da chiamare dopo aver scritto l'email o il telefono principali di una
+     * scheda senza passare da `syncAll()` (il pannello del cliente, la
+     * conferma dell'email di accesso): un contatto in più uguale al nuovo
+     * principale non resta due volte (il telefono principale ne prende il
+     * tipo, così tiene i suoi uffici) e gli uffici dei valori tolti se ne
+     * vanno (`dropOrphanDepartments()`). Gli altri contatti in più non si
+     * toccano.
+     */
+    public static function primaryWritten(string $owner, int $ownerId): void
+    {
+        $model = self::model($owner);
+        $ownerModel = $model::ownerModel();
+        $card = $ownerId > 0 ? $ownerModel::findById($ownerId) : null;
+
+        if (!is_array($card) || !isset($card['id'])) {
+            return;
+        }
+
+        Transaction::run(static function () use ($owner, $model, $ownerModel, $ownerId, $card): void {
+            $email = (string) ($card['email'] ?? '');
+            $phone = (string) ($card['phone'] ?? '');
+            $prefix = (string) ($card['phone_prefix'] ?? '');
+            $kind = null;
+
+            foreach (self::rows($model::find([$model::ownerKey() => $ownerId])) as $row) {
+                $rowKind = (string) ($row['kind'] ?? '');
+                $value = (string) ($row['value'] ?? '');
+                $rowPrefix = (string) ($row['phone_prefix'] ?? '');
+
+                if (self::isPhone($rowKind)) {
+                    $same = $phone !== '' && self::sameValue($rowKind, $value, $phone) && ($rowPrefix === '' || $prefix === '' || $rowPrefix === $prefix);
+                    $kind ??= $same ? $rowKind : null;
+                } else {
+                    $same = $rowKind === self::EMAIL && $email !== '' && self::sameValue($rowKind, $value, $email);
+                }
+
+                if ($same) {
+                    $model::delete((int) $row['id']);
+                }
+            }
+
+            if ($kind !== null && array_key_exists('phone_kind', $card) && $card['phone_kind'] !== $kind
+                && !($ownerModel::query()->Update($ownerModel::$table, ['phone_kind' => $kind], 'id', $ownerId)->success ?? false)) {
+                throw new RuntimeException('Contatti principali non salvati.');
+            }
+
+            RequestMemo::forget($model::$table, 'owner:'.$ownerId);
+            self::dropOrphanDepartments($ownerId, $owner);
+            RequestMemo::forget(self::departmentStore($owner)[0]::$table, 'owner:'.$ownerId);
+        });
+    }
+
     /** L'email in minuscolo, senza spazi intorno. */
     private static function email(mixed $value): string
     {

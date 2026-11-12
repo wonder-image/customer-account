@@ -3,6 +3,7 @@
 namespace Wonder\Plugin\CustomerAccount\Account;
 
 use Wonder\Plugin\CustomerAccount\Models\Contact;
+use Wonder\Plugin\CustomerAccount\Support\ContactPoints;
 
 /** Links an account to its fiscal identity without requiring billing data. */
 class ContactAccount
@@ -67,10 +68,31 @@ class ContactAccount
             ? Contact::update($values, (int) $contact['id'])
             : Contact::create($values);
 
+        if ($exists && ($result->success ?? false) && self::primaryChanged($contact, $values)) {
+            // I recapiti in più e gli uffici salvati dal backend restano allineati al nuovo principale.
+            try {
+                ContactPoints::primaryWritten(ContactPoints::CONTACT, (int) $contact['id']);
+            } catch (\Throwable) {
+                return (object) ['success' => false, 'reason' => 'contact_write_failed', 'contact_id' => (int) $contact['id']];
+            }
+        }
+
         return (object) [
             'success' => (bool) ($result->success ?? false),
             'reason' => ($result->success ?? false) ? '' : 'contact_write_failed',
             'contact_id' => (int) ($contact['id'] ?? $result->insert_id ?? 0),
         ];
+    }
+
+    /** L'email o il telefono della scheda cambiano con questa scrittura. */
+    private static function primaryChanged(array $contact, array $values): bool
+    {
+        foreach (['email', 'phone_prefix', 'phone'] as $column) {
+            if (array_key_exists($column, $values) && (string) ($contact[$column] ?? '') !== (string) $values[$column]) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

@@ -4,9 +4,14 @@ declare(strict_types=1);
 
 require __DIR__.'/support/FakeDb.php';
 require __DIR__.'/bootstrap.php';
+require_once WI_APP_ROOT.'/app/function/other/geo.php';
 
+use Wonder\Plugin\CustomerAccount\Account\AccountBilling;
 use Wonder\Plugin\CustomerAccount\Account\ContactAccount;
+use Wonder\Plugin\CustomerAccount\Account\CustomerAccountExtension;
 use Wonder\Plugin\CustomerAccount\Account\CustomerContact;
+use Wonder\Plugin\CustomerAccount\Support\ContactPoints;
+use Wonder\Plugin\CustomerAccount\Support\Crm;
 use Wonder\Sql\Query;
 
 $GLOBALS['__fake_users'] = [
@@ -65,6 +70,94 @@ check('linkKeepingIdentity senza scheda: la crea con i dati dell\'utente', funct
     $link = ContactAccount::linkKeepingIdentity(8);
     $contact = $row($link->contact_id);
     return $link->success && $contact['name'] === 'Bob' && $contact['email'] === 'bob@example.com' && (int) $contact['user_id'] === 8;
+});
+
+// Scheda con account, recapiti in più, uffici e social scritti dal backend.
+$crmTables = static fn (): array => [
+    'contacts' => [3 => [
+        'id' => 3, 'deleted' => 'false', 'email' => 'ada@example.com', 'name' => 'Ada', 'surname' => 'Lovelace',
+        'phone_prefix' => '+39', 'phone' => '021111', 'phone_kind' => 'phone', 'user_id' => 7, 'socials' => '{"instagram":"ada"}',
+    ]],
+    'contact_points' => [
+        1 => ['id' => 1, 'contact_id' => 3, 'kind' => 'mobile', 'value' => '3339998888', 'phone_prefix' => '+39', 'label' => 'personal', 'position' => 0, 'deleted' => 'false'],
+        2 => ['id' => 2, 'contact_id' => 3, 'kind' => 'email', 'value' => 'ada@lavoro.test', 'phone_prefix' => '', 'label' => 'work', 'position' => 1, 'deleted' => 'false'],
+    ],
+    'contact_point_departments' => [
+        1 => ['id' => 1, 'contact_id' => 3, 'kind' => 'phone', 'value' => '021111', 'department' => 'sales', 'deleted' => 'false'],
+        2 => ['id' => 2, 'contact_id' => 3, 'kind' => 'mobile', 'value' => '3339998888', 'department' => 'sales', 'deleted' => 'false'],
+    ],
+];
+$live = static fn (string $table): array => array_values(array_filter(Query::$tables[$table] ?? [], static fn (array $r): bool => ($r['deleted'] ?? 'false') === 'false'));
+
+check('telefono dal pannello: recapiti in più, social e tipo del telefono restano (CRM acceso e spento)', function () use ($crmTables, $live, $row) {
+    foreach ([false, true] as $crm) {
+        Crm::enable($crm);
+        Query::reset($crmTables());
+        $link = ContactAccount::link(7, ['phone_prefix' => '+39', 'phone' => '02 2222']);
+        $contact = $row(3);
+        $ok = $link->success && $contact['phone'] === '022222' && $contact['phone_kind'] === 'phone' && $contact['email'] === 'ada@example.com'
+            && $contact['socials'] === '{"instagram":"ada"}'
+            && array_column($live('contact_points'), 'value') === ['3339998888', 'ada@lavoro.test'];
+        Crm::enable(false);
+        if (!$ok) {
+            return false;
+        }
+    }
+    return true;
+});
+
+check('telefono dal pannello: gli uffici del numero tolto se ne vanno, quelli degli altri recapiti restano', function () use ($crmTables, $live) {
+    Query::reset($crmTables());
+    ContactAccount::link(7, ['phone_prefix' => '+39', 'phone' => '022222']);
+    return array_column($live('contact_point_departments'), 'value') === ['3339998888'];
+});
+
+check('telefono dal pannello uguale a un recapito in più: non resta due volte e tiene tipo e uffici', function () use ($crmTables, $live, $row) {
+    Query::reset($crmTables());
+    $link = ContactAccount::link(7, ['phone_prefix' => '+39', 'phone' => '333 999 8888']);
+    $contact = $row(3);
+    $phones = array_values(array_filter(ContactPoints::all(ContactPoints::CONTACT, 3), static fn (array $r): bool => ContactPoints::isPhone($r['kind'])));
+    return $link->success && $contact['phone'] === '3339998888' && $contact['phone_kind'] === 'mobile'
+        && array_column($live('contact_points'), 'value') === ['ada@lavoro.test']
+        && count($phones) === 1 && $phones[0]['is_primary'] === true && $phones[0]['kind'] === 'mobile'
+        && array_map(static fn (array $r): string => $r['kind'].'|'.$r['value'], $live('contact_point_departments')) === ['mobile|3339998888'];
+});
+
+check('telefono vuoto o uguale dal pannello: nessuna scrittura sui recapiti', function () use ($crmTables, $live) {
+    foreach (['', '021111'] as $phone) {
+        Query::reset($crmTables());
+        ContactAccount::link(7, ['phone_prefix' => '+39', 'phone' => $phone]);
+        if (count($live('contact_points')) !== 2 || count($live('contact_point_departments')) !== 2) {
+            return false;
+        }
+    }
+    return true;
+});
+
+check('ContactPoints::primaryWritten: l\'email di accesso uguale a un\'email in più non resta due volte', function () use ($crmTables, $live, $row) {
+    $tables = $crmTables();
+    $tables['contacts'][3]['email'] = 'Ada@Lavoro.test';
+    Query::reset($tables);
+    ContactPoints::primaryWritten(ContactPoints::CONTACT, 3);
+    return array_column($live('contact_points'), 'value') === ['3339998888'] && $row(3)['phone_kind'] === 'phone';
+});
+
+check('fatturazione dal pannello: il telefono uguale a un recapito in più non resta due volte, gli altri restano', function () use ($crmTables, $live, $row) {
+    $tables = $crmTables();
+    $tables['contacts'][3] += ['country' => 'IT', 'province' => 'MI', 'city' => 'Milano', 'cap' => '20100', 'street' => 'Via Roma', 'number' => '1', 'cf' => 'LVLDAA80A41F205X'];
+    Query::reset($tables);
+    $input = ['phone_prefix' => '+39', 'phone' => '3339998888'] + array_intersect_key($tables['contacts'][3], array_flip(['name', 'surname', 'country', 'province', 'city', 'cap', 'street', 'number', 'cf']));
+    $saved = AccountBilling::save(3, $input);
+    return $saved->success && $row(3)['phone'] === '3339998888' && $row(3)['phone_kind'] === 'mobile' && $row(3)['email'] === 'ada@example.com'
+        && array_column($live('contact_points'), 'value') === ['ada@lavoro.test']
+        && array_column($live('contact_point_departments'), 'value') === ['3339998888'];
+});
+
+check('email di accesso confermata dal pannello: un\'email in più uguale non resta due volte', function () use ($crmTables, $live, $row) {
+    Query::reset($crmTables());
+    (new CustomerAccountExtension())->afterEmailConfirmed(7, 'ada@lavoro.test');
+    return $row(3)['email'] === 'ada@lavoro.test' && array_column($live('contact_points'), 'value') === ['3339998888']
+        && $row(3)['phone'] === '021111' && $row(3)['socials'] === '{"instagram":"ada"}';
 });
 
 check('scrittura che fallisce: contact_write_failed', function () {

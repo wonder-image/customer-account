@@ -14,6 +14,7 @@ use Wonder\Http\Route;
 use Wonder\Plugin\CustomerAccount\CustomerAccount;
 use Wonder\Plugin\CustomerAccount\Models\Contact;
 use Wonder\Plugin\CustomerAccount\Support\BirthDate;
+use Wonder\Plugin\CustomerAccount\Support\ContactPoints;
 
 /**
  * La scheda cliente nel pannello del core: data di nascita e telefono in «Dati personali», la fatturazione
@@ -181,6 +182,8 @@ class CustomerAccountExtension extends BaseAccountExtension
             if (!(Contact::update(['email' => $email], (int) $contact['id'])->success ?? false)) {
                 throw new AccountSaveFailed('contact');
             }
+            // Un'email in più uguale alla nuova email di accesso non resta due volte.
+            ContactPoints::primaryWritten(ContactPoints::CONTACT, (int) $contact['id']);
         }
         CustomerContact::forget($userId);
     }

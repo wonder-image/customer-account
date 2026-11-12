@@ -125,6 +125,11 @@ Le convenzioni del framework sono in `vendor/wonder-image/app/AGENTS.md`.
   `linkKeepingIdentity()` (la tiene). Nella registrazione lo fa
   `HasSignupFields::afterUserSaved()`; i profili che usano il trait chiamano
   `parent::` e personalizzano con `linksContactOn()` / `afterContactLinked()`.
+- Pannello del cliente: chi scrive `contacts.email` o `phone` senza `syncAll()`
+  (`ContactAccount`, `AccountBilling::save()`, `afterEmailConfirmed()`) chiama dopo
+  `ContactPoints::primaryWritten()`: niente doppioni con i contatti in più,
+  niente uffici orfani; recapiti in più, social e `phone_kind` restano. Il
+  form degli indirizzi del pannello non ha «Presso» e non lo scrive.
 - Test: `WI_APP=<app> php tests/run.php`. Chi passa dai Model richiede prima
   `tests/support/FakeDb.php` (database in memoria). Vedi `README.md`.
 - Testo visibile: mai «—», «--» o «–» come opzione vuota, valore mancante o
