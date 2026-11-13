@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- Logo dei brand nella libreria Media del core: `CompanyBrand` usa `HasMedia` (colonna `logo_id`, tipi immagine e svg, slug `logo-{slug}`), il form usa `CompanyBrand::mediaInput('logo')` (drag & drop con la ricerca nella libreria) e il ridimensionatore prepara le misure. `Migrations\CompanyBrandMediaMigration` (`database.migrations_after_tables`) copia i loghi di `contacts/brand-logos/` nella libreria e svuota `logo`, che resta deprecata. `logoPath()` e `logoUrl()` leggono il media e ripiegano sul file di prima. Rottura: il form posta `logo_id` al posto di `logo`; un modulo che estende `CompanyBrandResource` e legge `logo` va aggiornato. Dopo l'aggiornamento serve `php forge update --local`.
+
 ### Added
 
 - Rappresentante legale: colonna `is_legal_representative` di `contact_relations` (`true` / `false`, default `false`) e spunta «Rappresentante legale» nella riga del referente e nella riga «Aziende» (`HasContactRelations::legalRepresentativeColumn()`), accanto a «Ufficio». Più d'uno per azienda; non dà accesso e non cambia aree né brand. `ContactRelations::sync()` la scrive (una riga senza la chiave tiene il valore salvato, un legame nuovo nasce `false`), `legalRepresentativesOf($companyId)` e `isLegalRepresentative($row)` la leggono, `ContactRecord` / `CompanyRecord` la portano in `relations` (`SCHEMA` 5 e 6). Dopo l'aggiornamento serve `php forge update --local` per la colonna.

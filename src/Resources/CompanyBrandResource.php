@@ -3,6 +3,7 @@
 namespace Wonder\Plugin\CustomerAccount\Resources;
 
 use InvalidArgumentException;
+use Wonder\App\Media\MediaInputs;
 use Wonder\App\Resource;
 use Wonder\App\ResourceSchema\{ApiSchema, FormField, NavigationSchema, PageSchema, PermissionSchema, RepeaterColumn, TableColumn};
 use Wonder\Backend\Support\QuickCreateStore;
@@ -57,7 +58,7 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
             'note' => (string) __t('contacts.note'),
             'archived' => (string) __t('contacts.brand_archived'),
             'parent_id' => (string) __t('contacts.brand_parent'),
-            'logo' => (string) __t('contacts.brand_logo'),
+            'logo_id' => (string) __t('contacts.brand_logo'),
         ];
 
         foreach ([...BrandData::BASE_FIELDS, ...BrandData::KIT_FIELDS] as $field) {
@@ -73,7 +74,7 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
         $fields = [
             FormField::key('name')->text()->label($labels['name'])->required(),
             FormField::key('parent_id')->selectSearch(['' => (string) __t('contacts.option_none')] + CompanyBrands::parentOptions())->label($labels['parent_id']),
-            FormField::key('logo')->fileDragDrop('image')->label($labels['logo']),
+            CompanyBrand::mediaInput('logo')->label($labels['logo_id']),
             FormField::key('website')->url()->label($labels['website']),
             FormField::key('domains')
                 ->repeater([
@@ -177,14 +178,14 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
         }
 
         foreach ($fields as $name => $field) {
-            if ($name !== 'logo' && !in_array($name, $head, true) && !in_array($name, $extra, true)) {
+            if ($name !== 'logo_id' && !in_array($name, $head, true) && !in_array($name, $extra, true)) {
                 $groups[isset($kit[$name]) ? 1 : 0][] = $field->columnSpan($widths[$name] ?? 12);
             }
         }
 
         $cards = [(new Card)->columns(12)->columnSpan(12)->components([
             SectionTitle::make((string) __t('contacts.brand_group_base'))->columnSpan(12),
-            $fields['logo']->columnSpan(4),
+            $fields['logo_id']->columnSpan(4),
             (new Container)->components(array_map(
                 static fn (string $name) => $fields[$name]->columnSpan(12),
                 array_values(array_filter($head, static fn (string $name): bool => isset($fields[$name])))
@@ -298,6 +299,15 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
     {
         return NavigationSchema::for(static::class)->title(static::textSchema()['plural_label'])->enabled(false);
     }
+    /** Il campo del logo e i suoi campi di servizio, che `MediaInputs` legge. */
+    protected static function logoKeys(): array
+    {
+        return ['logo_id', ...array_map(
+            static fn (string $suffix): string => 'logo_id'.$suffix,
+            [MediaInputs::FILES_SUFFIX, MediaInputs::PICKS_SUFFIX, MediaInputs::MAP_SUFFIX]
+        )];
+    }
+
     /**
      * Passano solo nome, note e archiviazione. Lo slug nasce dal nome alla
      * creazione (univoco, con `-1`, `-2`…), il codice lo dà il framework
@@ -310,14 +320,13 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
      * passano dalle regole di `BrandData` (URL solo http/https, colori
      * esadecimali, social della lista); il kit solo se è acceso. Con il CRM
      * spento l'email e il telefono del form sono la prima email e il primo
-     * telefono dei recapiti: gli altri recapiti e i social salvati restano. Il logo passa
-     * solo come file caricato: il framework ne controlla estensione e
-     * dimensione e ripulisce un SVG.
+     * telefono dei recapiti: gli altri recapiti e i social salvati restano. Il logo
+     * (`logo_id` e i suoi campi di servizio) passa com'è: lo controlla e lo
+     * carica nella libreria Media `MediaInputs::resolve()` del framework.
      */
     public static function mutateRequestValues(array $values, string $action, string $context = 'backend', ?array $oldValues = null): array
     {
-        $upload = $values['logo'] ?? null;
-        $manifest = $values['logo__wi_files'] ?? null;
+        $media = array_intersect_key($values, array_flip(static::logoKeys()));
         $kit = CompanyBrands::kitEnabled();
         $crm = Crm::enabled();
         $primaryOnly = $kit && !$crm;
@@ -345,14 +354,7 @@ class CompanyBrandResource extends Resource implements QuickCreateStore
             }
         }
 
-        // Un file o il suo ordine, mai un testo: un percorso o un URL scritti a mano non diventano il logo.
-        if (is_array($upload) && isset($upload['name'])) {
-            $values['logo'] = $upload;
-        }
-
-        if (is_string($manifest)) {
-            $values['logo__wi_files'] = $manifest;
-        }
+        $values += $media;
 
         $name = is_scalar($values['name'] ?? null) ? trim((string) $values['name']) : '';
         $id = (int) ($oldValues['id'] ?? 0);
