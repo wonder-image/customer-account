@@ -128,7 +128,7 @@ check('form del brand: due gruppi, il kit solo se acceso; URL non validi rifiuta
     CompanyBrands::useKit(false);
     Crm::enable(false);
 
-    return !in_array('email', $off, true) && in_array('logo', $off, true) && in_array('website', $off, true)
+    return !in_array('email', $off, true) && in_array('logo_id', $off, true) && in_array('website', $off, true)
         && in_array('socials', $on, true) && in_array('colors', $on, true) && CompanyBrands::kitEnabled() === false
         && $offCards === 1 && $onCards === 2
         && $values['website'] === 'https://lapiana.it' && $values['domain'] === 'lapiana.it' && !isset($values['email']) && !isset($values['colors'])
@@ -252,25 +252,21 @@ check('domini, recapiti, settore e lingua: liste pulite, primo valore nelle colo
         && isset(BrandData::languages()['it']) && BrandData::DEFAULT_LANGUAGE === 'it';
 });
 
-check('logo: passa solo un file caricato; nel record è un percorso, mai un URL o un percorso scritti a mano', function () use ($brand) {
+check('logo: passano solo logo_id e i suoi campi di servizio; nel record è un percorso, mai un URL o un percorso scritti a mano', function () use ($brand) {
     $upload = ['name' => ['logo.svg'], 'type' => ['image/svg+xml'], 'tmp_name' => ['/tmp/x'], 'error' => [0], 'size' => [10]];
-    $file = CompanyBrandResource::mutateRequestValues(['name' => 'A', 'logo' => $upload, 'logo__wi_files' => '[0]'], 'store');
+    $file = CompanyBrandResource::mutateRequestValues(['name' => 'A', 'logo_id' => $upload, 'logo_id__wi_files' => '[0]', 'logo_id__wi_picks' => '[null]'], 'store');
     $text = CompanyBrandResource::mutateRequestValues(['name' => 'B', 'logo' => 'javascript:alert(1)', 'logo__wi_files' => ['x']], 'store');
-    $logo = null;
+    $field = CompanyBrand::mediaFields()['logo'];
 
-    foreach (CompanyBrand::dataSchema() as $field) {
-        if ((string) $field->key === 'logo') {
-            $logo = $field;
-        }
-    }
-
-    return $file['logo'] === $upload && $file['logo__wi_files'] === '[0]'
+    return $file['logo_id'] === $upload && $file['logo_id__wi_files'] === '[0]' && $file['logo_id__wi_picks'] === '[null]'
         && !array_key_exists('logo', $text) && !array_key_exists('logo__wi_files', $text)
-        && in_array('svg', (array) ($logo->schema['extensions'] ?? []), true) && ($logo->schema['max_file'] ?? null) === 1
+        && CompanyBrand::mediaColumns() === ['logo_id'] && $field['legacy'] === 'contacts/brand-logos'
+        && CompanyBrand::mediaInput('logo')->name === 'logo_id'
         && CompanyBrand::logoPath(['logo' => '["la-piana.png"]']) === 'contacts/brand-logos/la-piana.png'
         && CompanyBrand::logoPath(['logo' => '["../../config.php"]']) === ''
         && CompanyBrand::logoPath(['logo' => '["https://evil.test/x.svg"]']) === ''
-        && CompanyBrand::logoPath(['logo' => '']) === '' && CompanyBrand::logoUrl(['logo' => '["../x"]']) === '';
+        && CompanyBrand::logoPath(['logo' => '']) === '' && CompanyBrand::logoUrl(['logo' => '["../x"]']) === ''
+        && CompanyBrand::legacyMediaDefinitions()[0]['table'] === 'company_brands';
 });
 
 check('CompanyRecord: i brand portano i loro dati, riletti con le regole', function () use ($brand) {
