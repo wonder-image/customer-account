@@ -1,0 +1,13 @@
+Componenti di terzi usati da questo software.
+Ogni componente resta regolato dalla propria licenza.
+
+PHP
+Nessun componente di terzi dichiarato direttamente in composer.json. Le dipendenze di terzi arrivano da wonder-image/app: vedi il file THIRD-PARTY-NOTICES di quel pacchetto.
+
+Componenti inclusi nel repository
+Nessuno.
+
+Solo sviluppo, non distribuiti
+Nessuno.
+
+Pacchetti dello stesso Titolare, regolati dalla loro licenza: wonder-image/app
