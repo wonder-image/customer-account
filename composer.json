@@ -2,7 +2,7 @@
     "name": "wonder-image/customer-account",
     "description": "Account cliente persistente per wonder-image/app: schede contatto, collegamento utente, fatturazione e indirizzi di spedizione.",
     "type": "library",
-    "license": "MIT",
+    "license": "proprietary",
     "require": {
         "php": "^8.2",
         "wonder-image/app": "^2.4.0-beta.7 || dev-main"
