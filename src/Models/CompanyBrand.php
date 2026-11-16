@@ -3,6 +3,9 @@
 namespace Wonder\Plugin\CustomerAccount\Models;
 
 use Throwable;
+use Wonder\App\Media\HasMedia;
+use Wonder\App\Media\MediaFile;
+use Wonder\App\Media\MediaTypes;
 use Wonder\App\Model;
 use Wonder\App\Support\MediaFileManager;
 use Wonder\App\Support\ModelCode;
@@ -28,15 +31,18 @@ use Wonder\Sql\TableSchema as Column;
  *
  * I dati del brand (logo, sito, domini email, descrizione) e il «brand kit»
  * (recapiti, social, colori, tono, settore, lingua, materiali) seguono le
- * regole di `Support\BrandData`. Il logo è un'immagine caricata dal framework
- * (un SVG lo ripulisce `uploadFiles()` del core); `domains`, `contacts`,
+ * regole di `Support\BrandData`. Il logo sta nella libreria Media del core
+ * ({@see HasMedia}): la riga ne tiene l'id (`logo_id`); la colonna `logo` di
+ * prima resta, deprecata, e si legge solo come ripiego. `domains`, `contacts`,
  * `socials` e `colors` sono JSON scritti già validati. `domain`, `email`,
  * `phone_prefix` e `phone` tengono il primo valore delle liste.
  */
 class CompanyBrand extends Model
 {
+    use HasMedia;
+
     public const CODE_PREFIX = 'cbr_';
-    /** La cartella del logo, sotto `$folder`. */
+    /** La cartella del logo di prima della libreria Media, sotto `$folder`. */
     public const LOGO_DIR = '/brand-logos/';
 
     public static string $table = 'company_brands';
@@ -58,7 +64,9 @@ class CompanyBrand extends Model
             Column::key('note')->type('TEXT'),
             Column::key('archived')->enum(['true', 'false'])->default('false'),
             Column::key('parent_id')->int()->null(false)->default('0'),
+            // Deprecata: il file di prima della libreria Media.
             Column::key('logo')->json(),
+            ...static::mediaTableColumns(),
             Column::key('website')->length(255),
             Column::key('domain')->length(190),
             Column::key('domains')->type('TEXT'),
@@ -96,13 +104,7 @@ class CompanyBrand extends Model
             Field::key('note')->text(),
             Field::key('archived')->text()->sanitize(false),
             Field::key('parent_id')->number()->decimals(0),
-            Field::key('logo')
-                ->image()
-                ->extensions(['png', 'jpg', 'jpeg', 'webp', 'svg'])
-                ->maxSize(2)
-                ->maxFile(1)
-                ->dir(self::LOGO_DIR)
-                ->name('{slug}'),
+            ...static::mediaDataFields(),
             // URL, dominio, recapiti, social e colori arrivano già validati da `BrandData`.
             Field::key('website')->text()->sanitize(false),
             Field::key('domain')->text()->sanitize(false),
@@ -121,22 +123,46 @@ class CompanyBrand extends Model
         ];
     }
 
+    public static function mediaFields(): array
+    {
+        return [
+            'logo' => [
+                'columns' => [MediaTypes::IMAGE => 'logo_id'],
+                'slug' => 'logo-{slug}',
+                'alt' => 'Logo {name}',
+                'name' => 'Logo {name}',
+                'legacy' => trim(static::$folder, '/').'/'.trim(self::LOGO_DIR, '/'),
+            ],
+        ];
+    }
+
     /**
      * Il logo come percorso sotto la cartella dei caricamenti
-     * (`contacts/brand-logos/la-piana.png`), vuoto se non c'è: per i record
-     * e i sync, che non portano file.
+     * (`image/logo-la-piana.png`, o `contacts/brand-logos/la-piana.png` se non
+     * è ancora migrato), vuoto se non c'è: per i record e i sync, che non
+     * portano file.
      */
     public static function logoPath(array $brand): string
     {
-        $file = self::logoFile($brand);
+        if (static::mediaId($brand, 'logo') > 0) {
+            $media = self::logoMedia($brand);
 
-        return $file === '' ? '' : trim(static::$folder, '/').'/'.trim(self::LOGO_DIR, '/').'/'.$file;
+            return $media === null || $media->file === '' ? '' : trim(MediaTypes::folder($media->type), '/').'/'.$media->file;
+        }
+
+        $file = self::legacyLogoFile($brand);
+
+        return $file === '' ? '' : (string) static::mediaFields()['logo']['legacy'].'/'.$file;
     }
 
     /** L'URL pubblico del logo, vuoto se non c'è o se il sito non è avviato (comandi, test). */
     public static function logoUrl(array $brand): string
     {
-        $file = self::logoFile($brand);
+        if (static::mediaId($brand, 'logo') > 0) {
+            return (string) self::logoMedia($brand)?->url();
+        }
+
+        $file = self::legacyLogoFile($brand);
 
         if ($file === '') {
             return '';
@@ -149,8 +175,17 @@ class CompanyBrand extends Model
         }
     }
 
-    /** Il nome del file del logo; un nome con percorsi o schemi non vale. */
-    private static function logoFile(array $brand): string
+    private static function logoMedia(array $brand): ?MediaFile
+    {
+        try {
+            return static::media($brand, 'logo');
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /** Il nome del file del logo di prima; un nome con percorsi o schemi non vale. */
+    private static function legacyLogoFile(array $brand): string
     {
         $file = MediaFileManager::decodeStoredFiles($brand['logo'] ?? '')[0] ?? '';
 

@@ -35,6 +35,9 @@
             "Wonder\\Plugin\\CustomerAccount\\Migrations\\RelationDepartmentsMigration",
             "Wonder\\Plugin\\CustomerAccount\\Migrations\\PointOfficeTypesMigration",
             "Wonder\\Plugin\\CustomerAccount\\Migrations\\CrmContactPointsMigration"
+        ],
+        "migrations_after_tables": [
+            "Wonder\\Plugin\\CustomerAccount\\Migrations\\CompanyBrandMediaMigration"
         ]
     },
     "views": {
