@@ -6,6 +6,7 @@ use InvalidArgumentException;
 use Wonder\Plugin\CustomerAccount\Models\Contact;
 use Wonder\Plugin\CustomerAccount\Resources\Concerns\HasContactRelations;
 use Wonder\Plugin\CustomerAccount\Support\ContactEvents;
+use Wonder\Plugin\CustomerAccount\Support\Import\{ImportLinks, PeopleLayout};
 use Wonder\Plugin\CustomerAccount\Support\ContactExport;
 use Wonder\App\Resource;
 use Wonder\App\ResourceRegistry;
@@ -84,6 +85,11 @@ class ContactResource extends Resource
     }
     /** I campi obbligatori della fatturazione. */
     public static function requiredKeys(): array { return ['name', 'surname']; }
+
+    /** Il tracciato del pulsante «Importa» dell'elenco. */
+    public static function importLayoutKey(): string { return PeopleLayout::KEY; }
+    /** Tracciati senza un elenco proprio: bottoni «Importa ...» accanto a «Importa». */
+    public static function importExtraLayouts(): array { return []; }
     /** I campi della ricerca nell'elenco. */
     public static function searchKeys(): array { return ['name', 'surname', 'email', 'city']; }
     /** I campi dell'export, in ordine. */
@@ -136,7 +142,9 @@ class ContactResource extends Resource
         return TableLayoutSchema::for(static::class)->searchFields(static::searchKeys())
             ->download(ContactExport::FORMATS)->downloadAsText()
             ->downloadColumns(ContactExport::columns(static::labelSchema(), [static::class, 'displayName'], [], static::exportFields()))
-            ->downloadFileName(create_link(static::textSchema()['plural_label']).'-'.date('Y-m-d'));
+            ->downloadFileName(create_link(static::textSchema()['plural_label']).'-'.date('Y-m-d'))
+            ->importLayout(static::importLayoutKey())
+            ->buttonsCustom(static::isReadonly() ? [] : ImportLinks::buttons(static::importExtraLayouts()));
     }
     public static function mutateRequestValues(array $values, string $action, string $context = 'backend', ?array $oldValues = null): array
     {

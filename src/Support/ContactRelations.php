@@ -952,6 +952,134 @@ final class ContactRelations
         return true;
     }
 
+    /** Le colonne del legame che scrive l'import. */
+    public const IMPORT_FIELDS = ['job_title', 'is_primary', 'receives_documents', 'is_legal_representative', 'access', 'email', 'phone_prefix', 'phone'];
+
+    /**
+     * Cosa farebbe `import()`, senza scrivere: la riga salvata (`id`, 0 se
+     * manca), se è viva, i valori che cambiano, quelli di prima e se
+     * `useAccessGuard()` ha abbassato l'accesso chiesto.
+     *
+     * Le chiavi assenti da `$values` tengono il valore di un legame vivo;
+     * un legame nuovo o riaperto parte senza accesso (`none`), non
+     * principale, con i documenti, non rappresentante legale e senza
+     * qualifica né contatti di lavoro.
+     *
+     * @param array<string, mixed> $values solo le chiavi di `IMPORT_FIELDS`
+     * @return array{id: int, live: bool, changed: array<string, string>, old: array<string, mixed>, access_lowered: bool}
+     */
+    public static function prepareImport(int $companyId, int $personId, array $values): array
+    {
+        $values = array_intersect_key($values, array_flip(self::IMPORT_FIELDS));
+        $existing = self::rows(ContactRelation::find([self::COMPANY => $companyId, self::PERSON => $personId, 'deleted' => ['true', 'false']]));
+        $stored = null;
+
+        foreach ($existing as $row) {
+            if ($stored === null || ($row['deleted'] ?? 'false') === 'false') {
+                $stored = $row;
+            }
+        }
+
+        $live = $stored !== null && ($stored['deleted'] ?? 'false') === 'false';
+        $base = $live
+            ? ['job_title' => (string) ($stored['job_title'] ?? '')]
+            : ['job_title' => '', 'is_primary' => 'false', 'receives_documents' => 'true', 'is_legal_representative' => 'false', 'access' => ContactRelation::ACCESS_NONE, 'email' => '', 'phone_prefix' => '', 'phone' => ''];
+        $clean = self::normalize([[self::PERSON => $personId] + $values + $base], $existing, self::COMPANY, $companyId, [$personId])[0];
+        $id = (int) ($clean['id'] ?? 0);
+        unset($clean['id']);
+        $clean[self::COMPANY] = $companyId;
+
+        $changed = $id > 0
+            ? array_filter($clean, static fn ($value, string $key): bool => (string) ($stored[$key] ?? '') !== (string) $value, ARRAY_FILTER_USE_BOTH)
+            : $clean;
+
+        return [
+            'id' => $id,
+            'live' => $live,
+            'changed' => array_map('strval', $changed),
+            'old' => $id > 0 ? array_intersect_key($stored, $changed) : [],
+            'access_lowered' => array_key_exists('access', $values) && self::rank($clean['access']) < self::rank(self::access($values['access'])),
+        ];
+    }
+
+    /**
+     * Crea, riapre o aggiorna il solo legame fra un'azienda e una persona per
+     * l'import, con le regole di `prepareImport()`. Gli altri principali
+     * dell'azienda decadono solo se `$values` chiede `is_primary`.
+     * `contact.linked` parte dopo il commit solo per un legame creato o riaperto.
+     *
+     * @param array<string, mixed> $values
+     * @return array{id: int, action: string, old: array<string, mixed>, demoted: list<int>, access_lowered: bool}
+     */
+    public static function import(int $companyId, int $personId, array $values): array
+    {
+        $result = Transaction::run(static function () use ($companyId, $personId, $values): array {
+            $plan = self::prepareImport($companyId, $personId, $values);
+            $id = $plan['id'];
+            $action = $id <= 0 ? 'created' : ($plan['changed'] === [] ? 'unchanged' : ($plan['live'] ? 'updated' : 'revived'));
+
+            if ($action === 'created') {
+                $max = ContactRelation::query()->Select(ContactRelation::$table, [self::COMPANY => $companyId], 1, null, null, 'MAX(position) AS pos')->row ?? [];
+                $write = ContactRelation::create($plan['changed'] + ['position' => (int) ($max['pos'] ?? 0) + 1]);
+                $id = (int) ($write->insert_id ?? 0);
+            } elseif ($action !== 'unchanged') {
+                $write = ContactRelation::query()->Update(ContactRelation::$table, $plan['changed'], 'id', $id);
+            }
+
+            if (isset($write) && (!($write->success ?? false) || $id <= 0)) {
+                throw new \RuntimeException('Legame azienda/persona non salvato.');
+            }
+
+            $demoted = array_key_exists('is_primary', $values) && self::flag($values['is_primary']) === 'true'
+                ? self::demoteOtherPrimaries($companyId, $personId)
+                : [];
+
+            if ($action !== 'unchanged') {
+                self::alignPoints($id);
+            }
+
+            $relation = in_array($action, ['created', 'revived'], true) ? ContactRelation::findById($id) : null;
+
+            return [
+                'id' => $id,
+                'action' => $action,
+                'old' => $plan['old'],
+                'demoted' => $demoted,
+                'access_lowered' => $plan['access_lowered'],
+                'event' => is_array($relation) ? self::eventPayload($relation) : null,
+            ];
+        });
+
+        if ($result['event'] !== null) {
+            ContactEvents::dispatch(ContactEvents::LINKED, $result['event']);
+        }
+
+        unset($result['event']);
+
+        return $result;
+    }
+
+    /**
+     * Rimette dei valori salvati su un legame (l'annullo di un import) e
+     * riallinea i recapiti alle colonne. Nessun evento.
+     *
+     * @param array<string, mixed> $values
+     */
+    public static function restore(int $relationId, array $values): void
+    {
+        if ($relationId <= 0 || $values === []) {
+            return;
+        }
+
+        $result = ContactRelation::query()->Update(ContactRelation::$table, $values, 'id', $relationId);
+
+        if (($result->success ?? false) !== true) {
+            throw new \RuntimeException('Annullo non riuscito per il legame '.$relationId.'.');
+        }
+
+        self::alignPoints($relationId);
+    }
+
     /**
      * La persona (non eliminata) che ha già questa email, o `[]`.
      *
@@ -1233,13 +1361,19 @@ final class ContactRelations
      * Quando una persona diventa il referente principale di un'azienda dal
      * lato delle sue aziende, le altre righe di quell'azienda smettono di esserlo.
      */
-    public static function demoteOtherPrimaries(int $companyId, int $personId): void
+    /** @return list<int> le righe che hanno smesso di essere principali */
+    public static function demoteOtherPrimaries(int $companyId, int $personId): array
     {
+        $demoted = [];
+
         foreach (self::rows(ContactRelation::find([self::COMPANY => $companyId, 'is_primary' => 'true'])) as $row) {
             if ((int) ($row[self::PERSON] ?? 0) !== $personId && isset($row['id'])) {
                 ContactRelation::query()->Update(ContactRelation::$table, ['is_primary' => 'false'], 'id', (int) $row['id']);
+                $demoted[] = (int) $row['id'];
             }
         }
+
+        return $demoted;
     }
 
     /**

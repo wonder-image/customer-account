@@ -4,6 +4,7 @@ namespace Wonder\Plugin\CustomerAccount\Resources;
 
 use InvalidArgumentException;
 use Wonder\Plugin\CustomerAccount\Models\{Contact, ContactAddress};
+use Wonder\Plugin\CustomerAccount\Support\Import\AddressLayout;
 use Wonder\App\ResourceSchema\{FormField, NavigationSchema, PageSchema, TableColumn, TableLayoutSchema};
 use Wonder\App\Support\GoogleMaps;
 use Wonder\Auth\Frontend\{AccountAddressForm, AccountAddressValidation};
@@ -77,8 +78,11 @@ class ContactAddressResource extends ContactResource
     public static function tableLayoutSchema(): TableLayoutSchema
     {
         return TableLayoutSchema::for(static::class)->searchFields(['label', 'business_name', 'name', 'surname', 'city', 'street'])
-            ->filterCustom(static::parentResourceLabel(), static::parentKey(), static::contactOptions());
+            ->filterCustom(static::parentResourceLabel(), static::parentKey(), static::contactOptions())
+            ->importLayout(static::importLayoutKey());
     }
+    /** Un solo tracciato per gli indirizzi di persone e aziende. */
+    public static function importLayoutKey(): string { return AddressLayout::KEY; }
     public static function mutateRequestValues(array $values, string $action, string $context = 'backend', ?array $oldValues = null): array
     {
         static::verifyFormToken($values);
