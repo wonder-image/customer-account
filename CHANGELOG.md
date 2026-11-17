@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.0 — 2026-11-17
+
 ### Changed
 
 - Logo dei brand nella libreria Media del core: `CompanyBrand` usa `HasMedia` (colonna `logo_id`, tipi immagine e svg, slug `logo-{slug}`), il form usa `CompanyBrand::mediaInput('logo')` (drag & drop con la ricerca nella libreria) e il ridimensionatore prepara le misure. `Migrations\CompanyBrandMediaMigration` (`database.migrations_after_tables`) copia i loghi di `contacts/brand-logos/` nella libreria e svuota `logo`, che resta deprecata. `logoPath()` e `logoUrl()` leggono il media e ripiegano sul file di prima. Rottura: il form posta `logo_id` al posto di `logo`; un modulo che estende `CompanyBrandResource` e legge `logo` va aggiornato. Dopo l'aggiornamento serve `php forge update --local`.
