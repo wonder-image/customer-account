@@ -23,4 +23,25 @@ return [
     'events' => [
         'listeners' => [],
     ],
+
+    /*
+     * Tracciati di importazione della rubrica, `[chiave => classe]`: il core
+     * scarta le voci senza chiave.
+     */
+    'import' => [
+        'layouts' => [
+            \Wonder\Plugin\CustomerAccount\Support\Import\PeopleLayout::KEY => \Wonder\Plugin\CustomerAccount\Support\Import\PeopleLayout::class,
+            \Wonder\Plugin\CustomerAccount\Support\Import\CompanyLayout::KEY => \Wonder\Plugin\CustomerAccount\Support\Import\CompanyLayout::class,
+            \Wonder\Plugin\CustomerAccount\Support\Import\AddressLayout::KEY => \Wonder\Plugin\CustomerAccount\Support\Import\AddressLayout::class,
+            \Wonder\Plugin\CustomerAccount\Support\Import\RelationLayout::KEY => \Wonder\Plugin\CustomerAccount\Support\Import\RelationLayout::class,
+        ],
+    ],
+
+    /*
+     * Moduli che allargano quei tracciati: classi che estendono
+     * `Support\Import\ImportExtension` (colonne, valori, permessi, schede visibili).
+     */
+    'contacts_import' => [
+        'extensions' => [],
+    ],
 ];

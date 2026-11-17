@@ -80,6 +80,35 @@ Serve un profilo con i campi: `Auth\CustomerAuthProfile` (il profilo del core pi
 
 `ContactResource` e `CompanyResource` esportano in Excel (.xlsx) e CSV dal bottone «Esporta» della tabella. Le colonne vengono da `Support\ContactExport::columns()` (`PERSON_FIELDS` per le persone, `COMPANY_FIELDS` per le aziende), condivise con le Resource del gestionale sulla stessa tabella: anagrafica, recapiti, fatturazione, stato e data di creazione. Le celle escono come testo (`downloadAsText()` del core): niente formule, zeri iniziali di CAP e telefoni intatti. L'export prende tutte le righe della `querySchema()` della Resource, non i filtri della tabella.
 
+## Import dei contatti
+
+Quattro tracciati dell'import del core (`Support\Import\*`, registrati in `import.layouts`), speculari all'export: stesse intestazioni, più codice e flag. «Importa» è nell'elenco di persone e aziende (`importLayoutKey()` della Resource, `TableLayoutSchema::importLayout()`); gli indirizzi dall'elenco degli indirizzi. La pagina di caricamento non è nel menu e `importLayout()` mette un solo bottone per elenco: i tracciati senza un elenco proprio li elenca `importExtraLayouts()` della Resource, che `Support\Import\ImportLinks::buttons()` trasforma in bottoni «Importa referenti», «Importa indirizzi» tra i bottoni dell'elenco (accanto a «File»), solo per chi il tracciato lo permette (le aziende hanno «Importa referenti»).
+
+| Tracciato | Chiave | Scrive in |
+|---|---|---|
+| Persone | `contacts_people` | `contacts` |
+| Aziende | `contacts_companies` | `companies` |
+| Indirizzi di consegna | `contacts_addresses` | `contact_addresses`, `company_addresses` |
+| Referenti | `contacts_relations` | `contact_relations` |
+
+- **Riconoscimento**: ID, poi codice, poi P.IVA (aziende) o codice fiscale ed email (persone). Trovata, la scheda si aggiorna; altrimenti si crea. Un dato che porta a un'altra scheda ferma la riga in anteprima con il nome di chi lo ha già; se quella scheda non è visibile a chi carica, l'errore non ne dice il nome (`used_hidden`).
+- **Celle vuote** e colonne non abbinate non toccano il valore salvato: l'import non svuota mai un campo. «Invariata» e l'annullo riguardano solo i campi cambiati.
+- **Persone e aziende**: codice nuovo in creazione, campi obbligatori, paese e provincia validi, validazione del Model già in anteprima, flag letti anche come «Sì/No», email ferma su una persona con account. Telefono «+39 3331234567»: il prefisso si separa allo spazio. Dopo ogni scrittura partono gli eventi `contact.*` / `company.*` come dal form; l'annullo riporta le colonne ma non emette eventi e non ricrea i recapiti in più. Il gruppo dell'azienda (`parent_id`) resta fuori.
+- **Indirizzi**: una riga è un indirizzo di una scheda che esiste (l'import non crea schede). Con l'ID dell'indirizzo si aggiorna quello; senza, si aggiorna l'indirizzo uguale (via, civico, CAP, città, paese) o se ne aggiunge uno. Lo stesso indirizzo due volte nel file ferma la seconda riga. «Predefinito» a sì toglie il predefinito agli altri.
+- **Referenti**: azienda e persona devono esistere. La riga crea, riapre o aggiorna il legame con `ContactRelations::prepareImport()` (anteprima) e `import()` (scrittura); l'annullo usa `restore()`. Un legame nuovo nasce senza accesso (`none`), non principale, con i documenti. `useAccessGuard()` vale anche qui: un accesso alzato senza permesso resta quello di prima, con un avviso. Aree e brand restano al form dell'azienda.
+- Un valore che non si riconosce (paese, accesso, scelta di un'estensione) ferma la riga con `contacts.import.errors.invalid_value`.
+
+**Estensioni.** Un modulo allarga i tracciati con una sottoclasse di `Support\Import\ImportExtension`, registrata in config o in codice con `ImportExtensions::add()`:
+
+```php
+// config/module.php del modulo
+'contacts_import' => [
+    'extensions' => [\Vendor\Modulo\ContactsImport::class],
+],
+```
+
+Ogni metodo riceve la chiave del tracciato e di base non cambia niente: `permits()` (true concede, false nega e vince, null lascia agli altri), `columns()` (colonne in più), `model()` (sottoclasse del Model sulla stessa tabella), `visible()` (le schede che chi carica può riconoscere), `backUrl()` (la lista a cui porta la freccia accanto al titolo del caricamento; vince la prima non null) e `values()` (valori, errori e avvisi in più per la riga; `$current` è null in creazione). Le estensioni si sommano e l'ordine non conta. Senza estensioni carica chi può modificare la Resource. Il gestionale ne registra una (`GestionaleContactsImport`): listino, pagamento e commerciale, visibilità del commerciale.
+
 ## Persone e aziende
 
 Una persona (`contacts`) e un'azienda (`companies`) sono schede distinte. Non c'è più il tipo `private`/`business`: la persona ha nome, cognome e codice fiscale; l'azienda ha ragione sociale, P.IVA, SDI e PEC. Tutte e due hanno la loro fatturazione e i loro indirizzi di spedizione.
